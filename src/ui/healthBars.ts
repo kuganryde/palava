@@ -40,8 +40,12 @@ export class HealthBars {
       const x = Math.round(sx - bw / 2), y = Math.round(sy - bh);
       c.fillStyle = 'rgba(12,18,38,0.85)'; c.fillRect(x - 1, y - 1, bw + 2, bh + 2);
       const f = Math.max(0, Math.min(1, it.frac));
-      c.fillStyle = f > 0.6 ? '#7fc46a' : f > 0.3 ? '#e0b040' : '#d6573f';
+      // Colour-blind-safe ramp (teal > amber > vermillion) plus tick marks at 1/3 and 2/3, so level never depends on hue alone.
+      c.fillStyle = f > 0.66 ? '#3fb8a0' : f > 0.33 ? '#e0b040' : '#d6573f';
       c.fillRect(x, y, Math.round(bw * f), bh);
+      c.fillStyle = 'rgba(12,18,38,0.9)';
+      c.fillRect(x + Math.round(bw / 3), y, 1, bh);
+      c.fillRect(x + Math.round((bw * 2) / 3), y, 1, bh);
       if (it.selected) { c.strokeStyle = '#f2d98a'; c.lineWidth = 1; c.strokeRect(x - 1.5, y - 1.5, bw + 3, bh + 3); }
     }
   }

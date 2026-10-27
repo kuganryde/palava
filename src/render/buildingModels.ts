@@ -38,7 +38,7 @@ export interface BuildingModel {
 const cache = new Map<string, BuiltModel>();
 
 /** Number of distinct architectural variants a type has (e.g. temples with 3, 4 or 5 tiers). */
-export const VARIANT_COUNT: Record<BuildingType, number> = { palace: 1, temple: 3, barracks: 2, farm: 2, lumber: 2, quarry: 2 };
+export const VARIANT_COUNT: Record<BuildingType, number> = { palace: 1, temple: 3, barracks: 2, farm: 2, lumber: 2, quarry: 2, stronghold: 1 };
 
 export function builtModel(type: BuildingType, variant = 0): BuiltModel {
   const v = ((Math.floor(variant) % VARIANT_COUNT[type]) + VARIANT_COUNT[type]) % VARIANT_COUNT[type];

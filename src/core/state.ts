@@ -9,7 +9,14 @@ export interface BuildingState {
   x0: number; // footprint origin cell
   z0: number;
   progress: number; // 0..1, complete at 1
+  /** Current hit points; missing means full health (def.hp). */
+  hp?: number;
 }
+
+export type Team = 0 | 1; // 0 = player, 1 = enemy
+
+/** One resolved attack, kept briefly so the renderer can show arrows, hits and deaths. Never saved. */
+export interface CombatEvent { t: number; from: number; to: number; ranged: boolean; killed: boolean }
 
 export interface UnitState {
   id: number;
@@ -21,16 +28,45 @@ export interface UnitState {
   facing: number; // radians about +Y
   hp: number;
   path: { x: number; z: number }[];
+  /** Attack-move: keep acquiring enemies while travelling to `goal`. */
+  amove?: boolean;
+  goal?: { x: number; z: number } | null;
+  /** Owner. Missing means the player (units created before combat existed). */
+  team?: Team;
+  /** Unit id being attacked, if any. */
+  target?: number | null;
+  /** Seconds until the next attack is allowed. */
+  cooldown?: number;
+  /** Seconds until the next re-path toward a moving target. */
+  repath?: number;
+  /** Seconds until the next scan for enemies while idle. */
+  scan?: number;
+  /** Sim time of death; the corpse is removed shortly after. */
+  diedAt?: number;
 }
 
+export interface AiState {
+  /** Index of the next raid wave. */
+  wave: number;
+  /** Sim time at which it launches. */
+  nextWave: number;
+}
+
+export type Outcome = 'victory' | 'defeat';
+
 export interface GameState {
-  version: 1;
+  version: 2;
   seed: number;
   time: number; // simulated seconds
   resources: Resources;
   buildings: BuildingState[];
   units: UnitState[];
   nextId: number;
+  ai?: AiState;
+  /** Set once the game is decided; the simulation then stops advancing. */
+  outcome?: Outcome;
+  /** Recent combat events (transient, not saved). */
+  events?: CombatEvent[];
 }
 
 export function emptyResources(): Resources {
@@ -53,8 +89,16 @@ export function missingResources(res: Resources, cost: Partial<Resources>): Reso
   return RESOURCE_IDS.filter((r) => res[r] < (cost[r] ?? 0));
 }
 
+export const buildingTeam = (b: BuildingState): Team => (b.type === 'stronghold' ? 1 : 0);
+export const buildingHp = (b: BuildingState): number => b.hp ?? BUILDING_DEFS[b.type].hp;
+export const teamOf = (u: { team?: Team }): Team => (u.team === 1 ? 1 : 0);
+export const isAlive = (u: { hp: number }): boolean => u.hp > 0;
+
+/** Living units of the player's team: corpses and enemies never count against the population cap. */
 export function population(state: GameState): number {
-  return state.units.length;
+  let n = 0;
+  for (const u of state.units) if (teamOf(u) === 0 && isAlive(u)) n++;
+  return n;
 }
 
 /** Capacity from completed buildings. */

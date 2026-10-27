@@ -1,5 +1,5 @@
 import { BUILDING_DEFS } from '../core/defs';
-import type { GameState } from '../core/state';
+import { buildingTeam, teamOf, type GameState } from '../core/state';
 import { terrainColor } from '../render/terrainView';
 import type { Terrain } from '../world/terrain';
 
@@ -79,14 +79,16 @@ export class Minimap {
 
     for (const b of state.buildings) {
       const def = BUILDING_DEFS[b.type];
-      g.fillStyle = b.progress >= 1 ? '#e0b040' : 'rgba(224,176,64,0.5)';
+      const foe = buildingTeam(b) === 1;
+      g.fillStyle = foe ? '#d9503f' : b.progress >= 1 ? '#e0b040' : 'rgba(224,176,64,0.5)';
       g.fillRect(b.x0 * k - 1, b.z0 * k - 1, def.w * k + 2, def.d * k + 2);
       g.strokeStyle = '#1b2a52';
       g.lineWidth = 1;
       g.strokeRect(b.x0 * k - 1, b.z0 * k - 1, def.w * k + 2, def.d * k + 2);
     }
     for (const u of state.units) {
-      g.fillStyle = selected.has(u.id) ? '#ffffff' : '#4f7dff';
+      if (u.hp <= 0) continue;
+      g.fillStyle = teamOf(u) === 1 ? '#ff5a48' : selected.has(u.id) ? '#ffffff' : '#4f7dff';
       g.fillRect(u.x * k - 1.5, u.z * k - 1.5, 3, 3);
     }
     if (viewQuad.length >= 3) {

@@ -18,7 +18,7 @@ Other commands:
 | `npm test` | 44 unit tests for the game systems (Vitest, no browser needed) |
 | `npm run typecheck` | Strict TypeScript check |
 | `npm run build` / `npm run preview` | Production build / serve it |
-| `npm run test:e2e` | Drives the real game in headless Chromium (35 + 23 + 8 checks across three scripts). One-time setup: `npx playwright install chromium` |
+| `npm run test:e2e` | Drives the real game in headless Chromium (86 checks across four scripts: base game, units/architecture, UI/camera/touch, combat). One-time setup: `npx playwright install chromium` |
 
 ## Controls
 
@@ -29,6 +29,7 @@ Other commands:
 | Build | Hotkeys 1–5 or the Construct menu; green ghost = valid, red = invalid; Shift-click to keep placing; Esc / right-click cancels |
 | Recruit | Select a finished Barracks → Recruit buttons |
 | Camera | WASD / arrows pan · Q / E rotate 90° · wheel or +/− zoom · middle-drag pan · H home · minimap click/drag |
+| Fight | Right-click an enemy to attack · F then click ground = attack-move · Alt+1–9 save a control group, Shift+1–9 recall (twice quickly = centre camera) |
 | Game | P / Space pause · Esc menu · F3 performance stats · M mute / unmute ambient sound |
 | Inspect | Zoom in past ~2.4× and the camera lowers its angle (to ~4.5×) for a close, side-on look at buildings and figures |
 
@@ -47,6 +48,18 @@ Other commands:
 - Instancing: all trees in one draw call, rocks in one, each troop kind in one, selection rings in one
 - Content-Security-Policy, no remote requests, no location or other permissions, no monetisation
 
+## Combat, rival kingdom and hardening (Stages 6–9)
+
+- **Combat:** units belong to a team, auto-acquire enemies within 9 cells when idle, chase, strike on a per-unit cooldown, and die (corpses linger 2.5 s, then are removed). Archers shoot from range and deal half damage to buildings. Pure, deterministic and unit-tested (`src/systems/combat.ts`).
+- **Rival kingdom:** an enemy Stronghold is placed deterministically far from your capital with a small garrison. It launches raid waves (first at 3:30, then every 80 s shrinking to 45 s, growing in size; cavalry from wave 3, elephants from wave 6) that attack-move on your palace. The AI has no economy: it spends time, not resources (`src/systems/enemyAi.ts`).
+- **Win/lose:** destroy the stronghold to win; lose if your palace falls. The simulation then freezes, a result screen appears, and the stale autosave is cleared.
+- **Presentation:** attack clip is driven by combat state, arrows fly for ranged hits, units flash when hit, enemy units are tinted crimson, wounded units/buildings show health bars (colour-blind-safe ramp plus tick marks), raid countdown chip and warning toast.
+- **Saves:** format v2 (team, target, cooldown, building hp, AI state, outcome). v1 saves load as all-player-units; saves without a rival get one added on load.
+- **Touch:** two-finger pinch zooms and pans.
+- **Accessibility:** `prefers-contrast` and `forced-colors` styles; every control still keyboard-operable.
+- **Night shadows:** the sun's shadow map stops updating when the sun is below the horizon.
+- **CI/CD:** `.github/workflows/ci.yml` (typecheck, unit tests, build, e2e in a real browser, `npm audit`, CycloneDX SBOM), `codeql.yml` (SAST), Dependabot, and `vercel.json` security headers. Not yet run on GitHub (no remote exists yet).
+
 ## Realism & visual-fidelity upgrade (Stages 1–5)
 
 - **Environment:** biome-driven terrain shading, chunked instanced vegetation with wind, animated sea, sky dome, day/night cycle, light rain and haze, drifting motes and birds.
@@ -58,15 +71,16 @@ Other commands:
 ## Known limits of this upgrade
 
 - Frame rate was only measured on software rendering (about 5 fps, ~100 draw calls); no real-GPU or mobile testing has been done.
-- Combat and enemy AI do not exist, so the attack and death clips have no in-game trigger yet (previewed via the debug hook). Villager build/gather clips are derived from proximity.
+- Combat balance (damage, wave sizes, timings) is a first pass and has not been play-tested by a human. Villager build/gather clips are derived from proximity; there is no real worker economy yet.
+- Destroying a building unblocks its footprint cells on the nav grid even if the terrain under them was already impassable (placement rules make this rare).
+- Control groups are not saved.
 - Audio output is synthesised and could not be heard or measured in the headless test; only error-free toggling is verified.
 - Old saves store only the terrain seed, so they may not match the new terrain.
 
 ## Not implemented yet (so you know where the edges are)
 
-Workers and worker assignment, research tree, combat and health damage, enemy faction and AI, victory conditions,
-campaign map, diplomacy/trade, quests/achievements, formations affecting combat, line of sight,
-control groups, pinch/two-finger touch gestures.
+Worker assignment, research tree, a real enemy economy, formations affecting combat, campaign map, diplomacy/trade,
+quests/achievements, line of sight, difficulty levels, a tutorial.
 
 ## Replacing a placeholder with a Blender `.glb`
 

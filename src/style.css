@@ -55,6 +55,9 @@ button.active { background-color: #34589f; border-color: var(--gold-hi); box-sha
 .resources .dot { width: 10px; height: 10px; border-radius: 3px; align-self: center; display: inline-block; }
 .resources .rate { font-size: 0.75rem; opacity: 0.8; }
 .resources li.low { border-color: var(--bad); }
+.chip.raid { border-color: var(--terracotta); color: #ffd2bd; }
+.chip.raid.warn { border-color: var(--bad); color: #fff; background: rgba(140, 30, 20, 0.55); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 10px rgba(224, 97, 74, 0.8); } }
 .chip[data-phase]::before { content: ''; align-self: center; width: 10px; height: 10px; border-radius: 50%; background: var(--gold-hi); box-shadow: 0 0 6px rgba(227, 196, 122, 0.7); }
 .chip[data-phase='dusk']::before { background: var(--terracotta); box-shadow: 0 0 6px rgba(181, 104, 63, 0.7); }
 .chip[data-phase='night']::before { background: transparent; box-shadow: inset -3px -1px 0 0 #d9dfef; }
@@ -89,7 +92,9 @@ button.active { background-color: #34589f; border-color: var(--gold-hi); box-sha
 .selpanel .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .selpanel .muted { color: var(--sand-dim); font-size: 0.85rem; }
 .bar { height: 10px; background: rgba(0, 0, 0, 0.55); border: 1px solid var(--bronze); border-radius: 5px; overflow: hidden; flex: 1; min-width: 80px; }
-.bar > i { display: block; height: 100%; background: var(--ok); }
+.bar { position: relative; }
+.bar > i { display: block; height: 100%; background: #3fb8a0; }
+.bar::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent calc(33.3% - 1px), rgba(12, 18, 38, 0.9) calc(33.3% - 1px) 33.3%, transparent 33.3% calc(66.6% - 1px), rgba(12, 18, 38, 0.9) calc(66.6% - 1px) 66.6%, transparent 66.6%); pointer-events: none; }
 .bar.build > i { background: var(--gold); }
 
 .minimap-wrap {
@@ -146,6 +151,17 @@ button.active { background-color: #34589f; border-color: var(--gold-hi); box-sha
   .selpanel { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .toast { animation: none; }
+  .toast, .chip.raid.warn { animation: none; }
   button { transition: none; }
+}
+
+/* Honour OS-level contrast preferences: stronger borders and text, no translucent panels. */
+@media (prefers-contrast: more) {
+  :root { --panel: rgb(10, 20, 48); --sand: #fff8e4; --sand-dim: #f0e6c8; }
+  button, select, .chip, .buildmenu, .selpanel, .toast { border-width: 2px; border-color: var(--gold-hi); }
+  .bar { border-color: var(--gold-hi); }
+}
+@media (forced-colors: active) {
+  button, .chip, .buildmenu, .selpanel, .toast, .bar { border: 1px solid CanvasText; }
+  .bar > i { background: Highlight; }
 }

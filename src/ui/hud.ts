@@ -28,7 +28,7 @@ export interface HudHandlers {
 export type SelectionInfo =
   | { kind: 'none' }
   | { kind: 'units'; counts: Partial<Record<UnitKind, number>>; avgHpFraction: number; moving: number; formation: FormationKind }
-  | { kind: 'building'; name: string; progress: number; description: string; recruit: { kind: UnitKind; enabled: boolean }[] | null };
+  | { kind: 'building'; hpFraction: number; name: string; progress: number; description: string; recruit: { kind: UnitKind; enabled: boolean }[] | null };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -188,6 +188,12 @@ export class Hud {
       return;
     }
     p.append(el('h2', undefined, info.name), el('span', 'muted', info.description));
+    if (info.hpFraction < 1) {
+      const hrow = el('div', 'row');
+      const hbar = el('div', 'bar'); const hfill = el('i'); hfill.style.width = `${Math.round(info.hpFraction * 100)}%`; hbar.append(hfill);
+      hrow.append(el('span', 'muted', 'Structure'), hbar, el('span', 'muted', `${Math.round(info.hpFraction * 100)}%`));
+      p.append(hrow);
+    }
     if (info.progress < 1) {
       const row = el('div', 'row');
       const bar = el('div', 'bar build'); const fill = el('i'); fill.style.width = `${Math.round(info.progress * 100)}%`; bar.append(fill);
@@ -213,6 +219,15 @@ export class Hud {
     root.append(t);
     const id = window.setTimeout(() => { t.remove(); this.toastTimers.delete(id); }, kind === 'error' ? 4500 : 3000);
     this.toastTimers.add(id);
+  }
+
+  /** Countdown to the next enemy raid; null hides the chip. */
+  setRaid(text: string | null, imminent: boolean): void {
+    this.set('raid', `${text}|${imminent}`, () => {
+      const e = $('raid');
+      e.hidden = text === null;
+      if (text !== null) { e.textContent = text; e.classList.toggle('warn', imminent); e.setAttribute('aria-label', `${text} until the next enemy raid`); }
+    });
   }
 
   /** Time-of-day chip, e.g. 06:30 with a sun/moon glyph drawn in CSS from the data-phase attribute. */
@@ -241,17 +256,22 @@ export class Hud {
     first?.focus();
   }
 
-  showOverlay(opts: { inGame: boolean; canContinue: boolean; note?: string }): void {
+  showOverlay(opts: { inGame: boolean; canContinue: boolean; note?: string; title?: string; sub?: string }): void {
     $('overlay').hidden = false;
     $('ov-resume').hidden = !opts.inGame;
     $('ov-save').hidden = !opts.inGame;
     $('ov-continue').hidden = opts.inGame || !opts.canContinue;
-    $('ov-title').textContent = 'PALAVA';
+    $('ov-title').textContent = opts.title ?? 'PALAVA';
+    $('ov-sub').textContent = opts.sub ?? 'Rise of an Ancient Kingdom';
     $('ov-note').textContent = opts.note ?? '';
     this.pane('main');
   }
   setNote(text: string): void { $('ov-note').textContent = text; }
-  hideOverlay(): void { $('overlay').hidden = true; }
+  hideOverlay(): void {
+    $('overlay').hidden = true;
+    $('ov-title').textContent = 'PALAVA'; // clear any VICTORY/DEFEAT headline
+    $('ov-sub').textContent = 'Rise of an Ancient Kingdom';
+  }
   get overlayOpen(): boolean { return !$('overlay').hidden; }
 
   syncSettings(s: Settings): void {

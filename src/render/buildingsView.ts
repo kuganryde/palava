@@ -20,7 +20,7 @@ function groundY(terrain: Terrain, type: BuildingType, x0: number, z0: number): 
 }
 
 /** Stone is the first thing delivered to grand works; the rest are timber jobs. */
-const PILE: Record<BuildingType, PileKind> = { palace: 'stone', temple: 'stone', quarry: 'stone', barracks: 'timber', farm: 'timber', lumber: 'timber' };
+const PILE: Record<BuildingType, PileKind> = { palace: 'stone', temple: 'stone', quarry: 'stone', barracks: 'timber', farm: 'timber', lumber: 'timber', stronghold: 'stone' };
 
 interface Entry {
   type: BuildingType;

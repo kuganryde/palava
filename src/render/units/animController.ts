@@ -40,11 +40,14 @@ export interface ChooseContext {
   /** Villager context: what the nearest relevant building is doing, if any. */
   nearby: 'none' | 'construction' | 'production';
   canWork: boolean;
+  /** In weapon range of a target and swinging (no path left to walk). */
+  attacking?: boolean;
 }
 
 /** Decide which clip a unit should be playing. Pure. */
 export function chooseClip(c: ChooseContext): number {
   if (c.hp <= 0) return CLIP.death;
+  if (c.attacking && !c.moving) return CLIP.attack;
   if (c.moving) return c.pathLength > RUN_PATH_POINTS ? CLIP.run : CLIP.walk;
   if (c.canWork) {
     if (c.nearby === 'construction') return CLIP.build;

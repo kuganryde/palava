@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { BUILDABLE, BUILDING_DEFS, MAX_UNITS, SIM_STEP, TRAINABLE, UNIT_DEFS, type BuildingType, type UnitKind } from './core/defs';
-import { canAfford, incomePerSecond, popCap, type GameState } from './core/state';
+import { buildingHp, canAfford, incomePerSecond, isAlive, popCap, population, teamOf, type GameState, type Team } from './core/state';
+import { commandAttack } from './systems/combat';
+import { addEnemyBase } from './systems/enemyAi';
 import { InputController } from './input';
 import { BuildingsView } from './render/buildingsView';
 import { loadUnitAsset, loadUnitManifest, UnitAssetLibrary } from './render/units/gltfUnits';
@@ -13,13 +15,14 @@ import { VegetationView } from './render/vegetationView';
 import { AdaptiveResolution } from './systems/adaptive';
 import type { FormationKind } from './systems/formation';
 import type { NavGrid } from './systems/pathfinding';
-import { footprintOrigin, PLACEMENT_MESSAGES, validatePlacement } from './systems/placement';
+import { footprintCenter, footprintOrigin, PLACEMENT_MESSAGES, validatePlacement } from './systems/placement';
 import { safeLocalStorage, SaveStore, type LoadResult } from './systems/save';
 import { boxSelect, mergeSelection, pickNearest, type ScreenItem } from './systems/selection';
 import {
   defaultSettings, loadSettings, QUALITY_PRESETS, saveSettings, type Settings,
 } from './systems/settings';
-import { buildNav, commandMove, createNewGame, placeBuilding, recruitUnit, stepSimulation } from './systems/simulation';
+import { buildNav, commandAttackMove, commandMove, createNewGame, placeBuilding, recruitUnit, stepSimulation } from './systems/simulation';
+import { CombatFx } from './render/combatFx';
 import { AmbientAudio } from './audio/ambient';
 import { HealthBars, type BarItem } from './ui/healthBars';
 import { clockText } from './world/environment';
@@ -84,6 +87,12 @@ export class Game {
   private markerLife = 0;
   private readonly clock = new THREE.Clock(false);
   private readonly audio = new AmbientAudio();
+  private outcomeShown = false;
+  private readonly fx: CombatFx;
+  private attackMoveArmed = false;
+  private readonly groups = new Map<number, number[]>();
+  private lastRecall = { index: -1, at: 0 };
+  private lastWave = 0;
   private readonly bars: HealthBars;
   private readonly barItems: BarItem[] = [];
   private readonly barPos = new THREE.Vector3();
@@ -102,6 +111,9 @@ export class Game {
     this.vegView = new VegetationView(placeVegetation(this.terrain));
     this.buildingsView = new BuildingsView(this.terrain);
     this.unitsView = new UnitsView(this.terrain);
+    this.fx = new CombatFx(this.terrain);
+    this.unitsView.flashes = this.fx.flashes;
+    scene.add(this.fx.group);
     scene.add(this.vegView.group, this.buildingsView.group, this.unitsView.group);
     this.unitsView.setAssets(this.unitAssets);
     this.loadModelsFromUrl();
@@ -140,6 +152,8 @@ export class Game {
       onPauseToggle: () => this.togglePause(),
       onEscape: () => this.handleEscape(),
       onHome: () => this.focusCapital(),
+      onAttackMove: () => this.armAttackMove(),
+      onGroup: (i, a) => this.controlGroup(i, a),
       onToggleSound: () => this.changeSettings({ sound: !this.settings.sound }),
       onToggleStats: () => { this.showStats = !this.showStats; this.hud.showStats(this.showStats); },
     });
@@ -179,6 +193,11 @@ export class Game {
     this.clearedBuildings.clear();
     this.acc = 0;
     this.alpha = 1;
+    this.outcomeShown = false;
+    this.attackMoveArmed = false;
+    this.canvas.style.cursor = '';
+    this.groups.clear();
+    this.lastWave = g.state.ai?.wave ?? 0;
     this.focusCapital(true);
     this.rig.setZoom(1.35);
     for (const u of this.state.units) { u.px = u.x; u.pz = u.z; }
@@ -204,7 +223,9 @@ export class Game {
   }
 
   private newGame(): void {
-    this.setWorld(createNewGame(this.terrain));
+    const g = createNewGame(this.terrain);
+    addEnemyBase(g.state, this.terrain, g.nav); // rival stronghold + garrison; raids start after a grace period
+    this.setWorld(g);
     this.autosaveTimer = 0;
     this.startPlaying();
     this.hud.toast('A new kingdom begins. Build, recruit, and explore.', 'good');
@@ -217,10 +238,13 @@ export class Game {
       this.hud.setNote(msg); this.hud.toast(msg, 'error');
       return;
     }
-    this.setWorld({ state: r.state, nav: buildNav(this.terrain, r.state) });
+    const g = { state: r.state, nav: buildNav(this.terrain, r.state) };
+    // Saves from before the rival existed get one now (unless the game was already decided).
+    const rivalAdded = !g.state.outcome && !g.state.buildings.some((b) => b.type === 'stronghold') && addEnemyBase(g.state, this.terrain, g.nav);
+    this.setWorld(g);
     this.autosaveTimer = 0;
     this.startPlaying();
-    this.hud.toast('Game loaded', 'good');
+    this.hud.toast(rivalAdded ? 'Game loaded — a rival stronghold has appeared' : 'Game loaded', 'good');
   }
 
   private continueGame(): void {
@@ -238,9 +262,25 @@ export class Game {
   }
 
   private autosave(silent: boolean): void {
-    if (!this.inGame) return;
+    if (!this.inGame || this.state.outcome) return; // a finished game is never autosaved
     const r = this.saves.save('autosave', this.state);
     if (!r.ok && !silent) this.hud.toast(`Autosave failed: ${r.error}`, 'error');
+  }
+
+  /** The game is decided: stop, clear the stale autosave, and show a result screen. */
+  private showOutcome(outcome: 'victory' | 'defeat'): void {
+    this.outcomeShown = true;
+    this.saves.clear('autosave');
+    this.menuOpen = true;
+    this.input.enabled = false;
+    this.cancelPlacing();
+    this.hud.showHud(true);
+    const won = outcome === 'victory';
+    this.hud.showOverlay({
+      inGame: false, canContinue: false, title: won ? 'VICTORY' : 'DEFEAT',
+      sub: won ? 'The rival stronghold has fallen. The kingdom is yours.' : 'Your palace has been destroyed.',
+      note: 'Start a new game or load a saved one.',
+    });
   }
 
   private openMenu(): void {
@@ -260,8 +300,9 @@ export class Game {
   }
 
   private handleEscape(): void {
-    if (this.menuOpen) { if (this.inGame) this.closeMenu(); return; }
+    if (this.menuOpen) { if (this.inGame && !this.state.outcome) this.closeMenu(); return; }
     if (this.placing) { this.cancelPlacing(); return; }
+    if (this.attackMoveArmed) { this.disarmAttackMove(); return; }
     this.openMenu();
   }
 
@@ -316,10 +357,12 @@ export class Game {
     return hit ? { x: hit.x, z: hit.z } : null;
   }
 
-  private unitScreenItems(): ScreenItem[] {
+  /** Screen positions of living units of one team (the player's by default). */
+  private unitScreenItems(team: Team = 0): ScreenItem[] {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     const out: ScreenItem[] = [];
     for (const u of this.state.units) {
+      if (!isAlive(u) || teamOf(u) !== team) continue;
       this.unitsView.renderPosition(u, this.alpha, this.tmp).y += 0.6;
       this.tmp.project(this.rig.camera);
       if (this.tmp.z < -1 || this.tmp.z > 1) continue;
@@ -333,6 +376,7 @@ export class Game {
   private handleClick(x: number, y: number, shift: boolean): void {
     if (this.menuOpen) return;
     if (this.placing) { this.tryPlace(x, y, shift); return; }
+    if (this.attackMoveArmed) { this.doAttackMove(x, y); return; }
     const id = pickNearest(this.unitScreenItems(), x, y, 24);
     if (id !== null) {
       this.selectedUnits = mergeSelection(this.selectedUnits, [id], shift);
@@ -365,7 +409,14 @@ export class Game {
   private handleRightClick(x: number, y: number): void {
     if (this.menuOpen) return;
     if (this.placing) { this.cancelPlacing(); return; }
+    if (this.attackMoveArmed) { this.disarmAttackMove(); return; }
     if (this.selectedUnits.size === 0) return;
+    // Right-clicking an enemy unit orders an attack instead of a move.
+    const foe = pickNearest(this.unitScreenItems(1), x, y, 26);
+    if (foe !== null) {
+      if (commandAttack(this.state, this.selectedUnits, foe) === 0) this.hud.toast('Your units cannot attack that', 'error');
+      return;
+    }
     const g = this.pickGround(x, y);
     if (!g) return;
     const moved = commandMove(this.state, this.nav, this.selectedUnits, g, this.formation);
@@ -373,6 +424,52 @@ export class Game {
     this.marker.position.set(g.x, this.groundHeight(g.x, g.z) + 0.15, g.z);
     this.marker.visible = true;
     this.markerLife = 1;
+  }
+
+  private armAttackMove(): void {
+    if (!this.inGame || this.menuOpen || this.placing) return;
+    if (this.selectedUnits.size === 0) { this.hud.toast('Select units first, then press F to attack-move', 'info'); return; }
+    this.attackMoveArmed = true;
+    this.canvas.style.cursor = 'crosshair';
+    this.hud.toast('Attack-move: click a destination (Esc cancels)', 'info');
+  }
+
+  private disarmAttackMove(): void {
+    this.attackMoveArmed = false;
+    this.canvas.style.cursor = '';
+  }
+
+  private doAttackMove(x: number, y: number): void {
+    this.disarmAttackMove();
+    const g = this.pickGround(x, y);
+    if (!g) return;
+    if (commandAttackMove(this.state, this.nav, this.selectedUnits, g, this.formation) === 0) { this.hud.toast('Units cannot reach that spot', 'error'); return; }
+    this.marker.position.set(g.x, this.groundHeight(g.x, g.z) + 0.15, g.z);
+    this.marker.visible = true;
+    this.markerLife = 1;
+  }
+
+  /** Alt+digit stores the current selection; Shift+digit recalls it (twice quickly also centres the camera). */
+  private controlGroup(index: number, action: 'set' | 'recall'): void {
+    if (!this.inGame || this.menuOpen) return;
+    if (action === 'set') {
+      if (this.selectedUnits.size === 0) return;
+      this.groups.set(index, [...this.selectedUnits]);
+      this.hud.toast(`Group ${index + 1} set (${this.selectedUnits.size} units)`, 'good');
+      return;
+    }
+    const alive = new Set(this.state.units.filter((u) => isAlive(u) && teamOf(u) === 0).map((u) => u.id));
+    const ids = (this.groups.get(index) ?? []).filter((id) => alive.has(id));
+    if (ids.length === 0) { this.hud.toast(`Group ${index + 1} is empty`, 'error'); return; }
+    this.selectedUnits = new Set(ids);
+    this.selectedBuilding = null;
+    const now = performance.now();
+    if (this.lastRecall.index === index && now - this.lastRecall.at < 450) {
+      const us = this.state.units.filter((u) => ids.includes(u.id));
+      this.rig.setTarget(us.reduce((a, u) => a + u.x, 0) / us.length, us.reduce((a, u) => a + u.z, 0) / us.length, false);
+    }
+    this.lastRecall = { index, at: now };
+    this.refreshHud(true);
   }
 
   private groundHeight(x: number, z: number): number {
@@ -435,9 +532,9 @@ export class Game {
     const b = this.selectedBuilding === null ? undefined : this.state.buildings.find((x) => x.id === this.selectedBuilding);
     if (b) {
       const def = BUILDING_DEFS[b.type];
-      const full = this.state.units.length >= Math.min(popCap(this.state), MAX_UNITS);
+      const full = population(this.state) >= Math.min(popCap(this.state), MAX_UNITS);
       return {
-        kind: 'building', name: def.name, description: def.description, progress: Math.round(b.progress * 100) / 100,
+        kind: 'building', hpFraction: buildingHp(b) / def.hp, name: def.name, description: def.description, progress: Math.round(b.progress * 100) / 100,
         recruit: TRAINABLE[b.type] && b.progress >= 1
           ? TRAINABLE[b.type]!.map((k) => ({ kind: k, enabled: !full && canAfford(this.state.resources, UNIT_DEFS[k].cost) }))
           : null,
@@ -451,10 +548,16 @@ export class Game {
     this.hudTimer = 0;
     // Drop selections that no longer exist (e.g. after loading).
     if (this.selectedUnits.size) {
-      const alive = new Set(this.state.units.map((u) => u.id));
+      const alive = new Set(this.state.units.filter((u) => isAlive(u) && teamOf(u) === 0).map((u) => u.id));
       for (const id of this.selectedUnits) if (!alive.has(id)) this.selectedUnits.delete(id);
     }
-    this.hud.setResources(this.state.resources, incomePerSecond(this.state), this.state.units.length, popCap(this.state), this.state.time);
+    this.hud.setResources(this.state.resources, incomePerSecond(this.state), population(this.state), popCap(this.state), this.state.time);
+    const ai = this.state.ai;
+    if (ai && !this.state.outcome && this.state.buildings.some((b) => b.type === 'stronghold')) {
+      const left = Math.max(0, Math.ceil(ai.nextWave - this.state.time));
+      this.hud.setRaid(`Raid ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`, left <= 20);
+      if (ai.wave > this.lastWave) { this.lastWave = ai.wave; this.hud.toast(`Enemy raid ${ai.wave} is marching on your palace!`, 'error'); }
+    } else this.hud.setRaid(null, false);
     const tod = this.atmosphere.timeOfDay, day = this.atmosphere.sky.day;
     this.hud.setDayTime(clockText(tod), day > 0.7 ? 'day' : day > 0.25 ? 'dusk' : 'night');
     this.hud.setBuildState(this.state.resources, this.placing);
@@ -488,8 +591,9 @@ export class Game {
     if (this.inGame && !this.paused && !this.menuOpen) {
       this.acc += dt * this.speed;
       let steps = 0;
-      while (this.acc >= SIM_STEP && steps < 6) { stepSimulation(this.state, SIM_STEP); this.acc -= SIM_STEP; steps++; }
+      while (this.acc >= SIM_STEP && steps < 6) { stepSimulation(this.state, SIM_STEP, this.nav); this.acc -= SIM_STEP; steps++; }
       if (steps === 6) this.acc = 0;
+      if (this.state.outcome && !this.outcomeShown) this.showOutcome(this.state.outcome);
       this.alpha = this.acc / SIM_STEP;
       this.autosaveTimer += dt;
       if (this.autosaveTimer >= AUTOSAVE_SECONDS) { this.autosaveTimer = 0; this.autosave(false); }
@@ -511,6 +615,7 @@ export class Game {
       this.vegView.clearRect(b.x0, b.z0, def.w, def.d);
     }
     this.buildingsView.sync(this.state, this.selectedBuilding, t, this.settings.reducedMotion);
+    this.fx.update(this.state, Math.min(dt, 0.1), this.settings.reducedMotion);
     this.unitsView.update(this.state, this.selectedUnits, this.alpha, t, this.settings.reducedMotion);
 
     this.hudTimer += dt;
@@ -543,6 +648,14 @@ export class Game {
         if (!sel && u.hp >= def.hp) continue;
         this.unitsView.renderPosition(u, this.alpha, this.barPos);
         items.push({ x: this.barPos.x, y: this.barPos.y + def.radius * 3.2 + 1.2, z: this.barPos.z, frac: u.hp / def.hp, selected: sel, width: Math.max(0.8, def.radius * 1.6) });
+      }
+    }
+    if (this.inGame) {
+      for (const b of this.state.buildings) {
+        const def = BUILDING_DEFS[b.type], hp = buildingHp(b);
+        if (hp >= def.hp || b.progress < 1) continue; // only damaged, finished buildings
+        const c = footprintCenter(def, b.x0, b.z0);
+        items.push({ x: c.x, y: this.groundHeight(c.x, c.z) + 3.4, z: c.z, frac: hp / def.hp, selected: this.selectedBuilding === b.id, width: def.w * 0.7 });
       }
     }
     this.bars.draw(items, this.rig.camera, this.rig.zoom);

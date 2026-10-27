@@ -288,5 +288,36 @@ function quarry(b: ModelBuilder, variant: number): void {
   b.detail(false);
 }
 
+/** The rival kingdom's fortress: a walled compound with four corner towers, a gate and a central keep. */
+function stronghold(b: ModelBuilder, variant: number): void {
+  const top = plinth(b, [[6.7, 6.7, 0.2], [6.4, 6.4, 0.2]]);
+  b.window(0.2, 0.55);
+  // curtain walls (the front wall leaves a gate gap on +Z)
+  b.box('stone', 5.6, 1.5, 0.4, 0, top, -2.8);
+  b.box('stone', 0.4, 1.5, 5.6, -2.8, top, 0);
+  b.box('stone', 0.4, 1.5, 5.6, 2.8, top, 0);
+  b.box('stone', 1.9, 1.5, 0.4, -1.85, top, 2.8);
+  b.box('stone', 1.9, 1.5, 0.4, 1.85, top, 2.8);
+  b.box('dark', 1.2, 1.1, 0.3, 0, top, 2.8);
+  b.box('timber', 1.7, 0.18, 0.5, 0, top + 1.1, 2.8);
+  // corner towers
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    b.box('sandstone', 1.1, 2.3, 1.1, sx * 2.8, top, sz * 2.8);
+    b.box('stone', 1.3, 0.14, 1.3, sx * 2.8, top + 2.3, sz * 2.8);
+    b.hipRoof('tile', 1.35, 1.35, 0.8, 0, sx * 2.8, top + 2.44, sz * 2.8);
+  }
+  // keep
+  b.window(0.5, 0.85);
+  b.box('sandstone', 2.4, 2.4, 2.4, 0, top, -0.3);
+  b.box('stone', 2.6, 0.14, 2.6, 0, top + 2.4, -0.3);
+  b.hipRoof('tile', 2.8, 2.8, 1.2, 1.0, 0, top + 2.54, -0.3);
+  b.detail(true);
+  b.box('dark', 0.7, 1.0, 0.06, 0, top, 0.92);
+  for (const x of [-0.8, 0.8]) b.box('dark', 0.25, 0.5, 0.06, x, top + 1.3, 0.92);
+  b.detail(false);
+  b.window(0.85, 1);
+  b.banner(variant % 2 ? -1.0 : 1.0, -0.3, top + 3.7, 1.7, 0.9);
+}
+
 export type Recipe = (b: ModelBuilder, variant: number) => void;
-export const RECIPES: Record<BuildingType, Recipe> = { palace, temple, barracks, farm, lumber, quarry };
+export const RECIPES: Record<BuildingType, Recipe> = { palace, temple, barracks, farm, lumber, quarry, stronghold };

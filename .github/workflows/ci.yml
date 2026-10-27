@@ -1,0 +1,69 @@
+# Shift-left pipeline: every push and PR is type-checked, unit-tested, built, driven end to end in a real
+# browser, and scanned for vulnerable dependencies. Deployment happens through Vercel's Git integration
+# (a preview per PR, production from main) only after this workflow is green (set it as a required check).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: the workflow can read the repo and nothing else.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # Third-party actions should be pinned to a full commit SHA once you have vetted them; tags are used here
+      # so the file works out of the box. Dependabot (see .github/dependabot.yml) keeps them current.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install (lockfile only, no install scripts from unexpected sources)
+        run: npm ci
+      - name: Type check (src + tests)
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Production build
+        run: npx vite build
+      - name: Install browser for end-to-end tests
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests (software WebGL)
+        run: npm run test:e2e
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: e2e/artifacts/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Audit dependencies (fail on high or critical)
+        run: npm audit --audit-level=high
+      - name: Generate SBOM (CycloneDX)
+        run: npx --yes @cyclonedx/cyclonedx-npm --omit dev --output-file sbom.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json

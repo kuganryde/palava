@@ -3,7 +3,7 @@ import {
   type BuildingType, type UnitKind,
 } from '../core/defs';
 import {
-  canAfford, popCap, spend, startingResources,
+  canAfford, popCap, population, spend, startingResources, teamOf,
   type BuildingState, type GameState, type UnitState,
 } from '../core/state';
 import { capitalCenter, type Terrain } from '../world/terrain';
@@ -11,6 +11,10 @@ import { assignSlots, formationSlots, type FormationKind } from './formation';
 import {
   buildNavGrid, findPath, nearestWalkable, setBlockedRect, type NavGrid, type Point,
 } from './pathfinding';
+import { makeUnit } from './unitFactory';
+export { makeUnit };
+import { stepCombat } from './combat';
+import { stepAi } from './enemyAi';
 import { footprintCenter, validatePlacement, type PlacementResult } from './placement';
 
 /** Nav grid = terrain walkability + building footprints. Rebuilt after loading a save. */
@@ -23,16 +27,10 @@ export function buildNav(terrain: Terrain, state: GameState): NavGrid {
   return nav;
 }
 
-function makeUnit(state: GameState, kind: UnitKind, x: number, z: number): UnitState {
-  return {
-    id: state.nextId++, kind, x, z, px: x, pz: z, facing: 0,
-    hp: UNIT_DEFS[kind].hp, path: [],
-  };
-}
 
 export function createNewGame(terrain: Terrain): { state: GameState; nav: NavGrid } {
   const state: GameState = {
-    version: 1, seed: terrain.seed, time: 0, resources: startingResources(),
+    version: 2, seed: terrain.seed, time: 0, resources: startingResources(),
     buildings: [], units: [], nextId: 1,
   };
   const nav = buildNavGrid(terrain);
@@ -78,7 +76,7 @@ export function recruitUnit(state: GameState, nav: NavGrid, buildingId: number, 
   if (b.type !== UNIT_DEFS[kind].trainedAt) return { ok: false, reason: 'not-barracks' }; // wrong building for this unit
   if (b.progress < 1) return { ok: false, reason: 'under-construction' };
   if (state.units.length >= MAX_UNITS) return { ok: false, reason: 'unit-limit' };
-  if (state.units.length >= popCap(state)) return { ok: false, reason: 'population' };
+  if (population(state) >= popCap(state)) return { ok: false, reason: 'population' };
   const cost = UNIT_DEFS[kind].cost;
   if (!canAfford(state.resources, cost)) return { ok: false, reason: 'unaffordable' };
   const def = BUILDING_DEFS[b.type];
@@ -98,7 +96,7 @@ export function commandMove(
   state: GameState, nav: NavGrid, unitIds: Iterable<number>, target: Point, formation: FormationKind,
 ): number {
   const ids = new Set(unitIds);
-  const units = state.units.filter((u) => ids.has(u.id));
+  const units = state.units.filter((u) => ids.has(u.id) && u.hp > 0 && teamOf(u) === 0);
   if (units.length === 0) return 0;
   const centroid = {
     x: units.reduce((s, u) => s + u.x, 0) / units.length,
@@ -111,19 +109,38 @@ export function commandMove(
   units.forEach((u, i) => {
     const slot = slots[assignment[i]!]!;
     const path = findPath(nav, u.x, u.z, slot.x, slot.z);
+    u.target = null; // a move order cancels any attack order
+    u.amove = false; u.goal = null;
     if (path) { u.path = path; moved++; } else { u.path = []; }
   });
   return moved;
 }
 
+/** Like a move, but units fight anything they meet on the way and then carry on to the destination. */
+export function commandAttackMove(
+  state: GameState, nav: NavGrid, unitIds: Iterable<number>, target: Point, formation: FormationKind,
+): number {
+  const ids = new Set(unitIds);
+  const moved = commandMove(state, nav, ids, target, formation);
+  for (const u of state.units) {
+    if (!ids.has(u.id) || u.hp <= 0 || teamOf(u) !== 0 || u.path.length === 0) continue;
+    u.amove = true;
+    u.goal = { ...u.path[u.path.length - 1]! };
+  }
+  return moved;
+}
+
 export function stopUnits(state: GameState, unitIds: Iterable<number>): void {
   const ids = new Set(unitIds);
-  for (const u of state.units) if (ids.has(u.id)) u.path = [];
+  for (const u of state.units) if (ids.has(u.id)) { u.path = []; u.target = null; u.amove = false; u.goal = null; }
 }
 
 /** Advance the deterministic simulation by a fixed `dt`. */
-export function stepSimulation(state: GameState, dt: number): void {
+/** `nav` enables pursuit pathing in combat; without it units still fight whatever is in reach. */
+export function stepSimulation(state: GameState, dt: number, nav?: NavGrid): void {
+  if (state.outcome) return; // the game is decided: nothing advances
   state.time += dt;
+  stepAi(state, nav);
 
   for (const b of state.buildings) {
     if (b.progress < 1) b.progress = Math.min(1, b.progress + dt / BUILDING_DEFS[b.type].buildTime);
@@ -138,7 +155,10 @@ export function stepSimulation(state: GameState, dt: number): void {
     }
   }
 
+  stepCombat(state, nav, dt);
+
   for (const u of state.units) {
+    if (u.hp <= 0) { u.px = u.x; u.pz = u.z; continue; }
     u.px = u.x;
     u.pz = u.z;
     let remaining = UNIT_DEFS[u.kind].speed * dt;

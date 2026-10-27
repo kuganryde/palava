@@ -102,6 +102,9 @@ export class Atmosphere {
     sun.target.position.copy(target);
     sun.color.copy(Atmosphere.set(this.cSun, s.sunColor));
     sun.intensity = s.sunIntensity;
+    // Night: the sun contributes nothing, so skip re-rendering its shadow map every frame (castShadow stays on,
+    // otherwise toggling it would change the light/shadow count and force a shader recompile at dusk and dawn).
+    sun.shadow.autoUpdate = s.sunIntensity > 0.03;
     moon.position.copy(target).addScaledVector(this.vMoon, LIGHT_DISTANCE);
     moon.target.position.copy(target);
     moon.color.copy(Atmosphere.set(this.cMoon, s.moonColor));

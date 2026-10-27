@@ -65,6 +65,19 @@ check('M key unmutes', (await page.getAttribute('#btn-sound', 'aria-pressed')) =
 const ctxState = await page.evaluate(() => window.__palava.debug && 'ok');
 check('no console errors after sound toggling (audible output not verifiable headless)', !!ctxState && logs.length === 0, logs.join(' | '));
 
+// Touch: a two-finger spread zooms the camera in; lifting a finger afterwards does not select anything
+await dbg('(() => { g.rig.setZoom(1.2, true); g.selectedUnits.clear(); })()');
+const z0 = await dbg('g.rig.zoomLevel');
+const cdp = await page.context().newCDPSession(page);
+const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p, i) => ({ x: p[0], y: p[1], id: i + 1 })) });
+await touch('touchStart', [[500, 300], [600, 300]]);
+for (let i = 1; i <= 6; i++) await touch('touchMove', [[500 - i * 20, 300], [600 + i * 20, 300]]);
+await touch('touchEnd', []);
+await page.waitForTimeout(500);
+const z1 = await dbg('g.rig.zoomLevel');
+check('two-finger spread zooms in', z1 > z0 * 1.3, `${z0.toFixed(2)} -> ${z1.toFixed(2)}`);
+check('pinch does not trigger a click-selection', (await dbg('g.selectedUnits.size')) === 0);
+
 await page.evaluate(() => window.__palava.debug().rig.setZoom(5));
 await page.waitForTimeout(1200);
 await page.screenshot({ path: `${OUT}/stage5-inspect.png` });

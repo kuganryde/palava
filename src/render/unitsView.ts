@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BUILDING_DEFS, MAX_UNITS, UNIT_DEFS, UNIT_KINDS, type UnitKind } from '../core/defs';
-import type { GameState, UnitState } from '../core/state';
+import { teamOf, type GameState, type UnitState } from '../core/state';
 import { heightAt, type Terrain } from '../world/terrain';
 import { AnimController, CLIP, CLIPS, chooseClip, type ChooseContext } from './units/animController';
 import { SkinnedPool, type UnitAssetLibrary } from './units/gltfUnits';
@@ -121,6 +121,9 @@ export class UnitsView {
     return best;
   }
 
+  /** Unit id -> hit-flash seconds left; supplied by CombatFx. */
+  flashes: ReadonlyMap<number, number> | null = null;
+
   update(state: GameState, selected: ReadonlySet<number>, alpha: number, timeSeconds: number, reducedMotion: boolean): void {
     const dt = this.lastTime < 0 ? 0 : timeSeconds - this.lastTime;
     this.lastTime = timeSeconds;
@@ -140,6 +143,7 @@ export class UnitsView {
 
       const c = this.ctx;
       c.hp = u.hp; c.moving = u.path.length > 0; c.pathLength = u.path.length;
+      c.attacking = u.target != null && u.path.length === 0;
       c.canWork = kind === 'villager';
       c.nearby = c.canWork && !c.moving ? this.nearby(u, state) : 'none';
       const st = this.controller.step(u.id, chooseClip(c), this.p.x, this.p.z, dt, RIG_KIND[kind].stride);
@@ -173,7 +177,11 @@ export class UnitsView {
       mesh.setMatrixAt(i, this.m);
       // small per-unit tint so a crowd does not look cloned
       const v = 0.9 + 0.2 * st.seed;
-      mesh.setColorAt(i, this.tint.setRGB(v, v, v));
+      // enemies are tinted crimson so the two armies read apart at a glance
+      if (teamOf(u) === 1) this.tint.setRGB(v * 1.1, v * 0.55, v * 0.5); else this.tint.setRGB(v, v, v);
+      const f = this.flashes?.get(u.id);
+      if (f) { const k = f / 0.18 * 1.2; this.tint.r += k; this.tint.g += k; this.tint.b += k; } // brief white flash on hit
+      mesh.setColorAt(i, this.tint);
 
       if (selected.has(u.id) && ringN < MAX_UNITS) {
         const k = Math.max(1, UNIT_DEFS[kind].radius / 0.35 * 0.85);

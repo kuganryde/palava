@@ -3,7 +3,7 @@ import {
   type BuildingType, type UnitKind,
 } from '../core/defs';
 import { clamp } from '../core/math';
-import { emptyResources, type BuildingState, type GameState, type UnitState } from '../core/state';
+import { emptyResources, teamOf, type BuildingState, type GameState, type UnitState } from '../core/state';
 
 /** Minimal Storage contract so tests can inject an in-memory implementation. */
 export interface KeyValueStore {
@@ -16,19 +16,30 @@ export type SaveSlot = 'autosave' | 'manual';
 export type LoadResult = { ok: true; state: GameState; savedAt: number } | { ok: false; error: string };
 export type SaveResult = { ok: true; savedAt: number } | { ok: false; error: string };
 
-const KEY_PREFIX = 'palava.save.v1.';
+const KEY_PREFIX = 'palava.save.v1.'; // slot keys keep the v1 prefix so older saves are still found and migrated
 const MAX_SAVE_BYTES = 2_000_000; // refuse absurdly large payloads before parsing
 const MAX_PATH_POINTS = 512;
 
 export function serializeState(state: GameState, savedAt = Date.now()): string {
+  const { events: _events, ...rest } = state; // combat events are transient
   const slim = {
-    ...state,
-    units: state.units.map((u) => ({ id: u.id, kind: u.kind, x: u.x, z: u.z, facing: u.facing, hp: u.hp, path: u.path })),
+    ...rest,
+    buildings: state.buildings.map((b) => ({ id: b.id, type: b.type, x0: b.x0, z0: b.z0, progress: b.progress, hp: b.hp })),
+    // Corpses are not worth saving; targets/cooldowns are so a fight resumes where it stopped.
+    units: state.units.filter((u) => u.hp > 0).map((u) => ({
+      id: u.id, kind: u.kind, x: u.x, z: u.z, facing: u.facing, hp: u.hp, path: u.path,
+      team: teamOf(u), target: u.target ?? null, cooldown: u.cooldown ?? 0, amove: u.amove === true, goal: u.goal ?? null,
+    })),
   };
-  return JSON.stringify({ v: 1, savedAt, state: slim });
+  return JSON.stringify({ v: 2, savedAt, state: slim });
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+function parsePoint(v: unknown, mapSize: number): { x: number; z: number } | null {
+  if (!isObj(v)) return null;
+  const x = num(v.x), z = num(v.z);
+  return x === null || z === null ? null : { x: clamp(x, 0, mapSize - 1), z: clamp(z, 0, mapSize - 1) };
+}
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 /**
@@ -40,7 +51,8 @@ export function parseSave(raw: string, mapSize: number): LoadResult {
   if (raw.length > MAX_SAVE_BYTES) return { ok: false, error: 'Save data is too large' };
   let data: unknown;
   try { data = JSON.parse(raw); } catch { return { ok: false, error: 'Save data is corrupted' }; }
-  if (!isObj(data) || data.v !== 1 || !isObj(data.state)) return { ok: false, error: 'Unsupported save version' };
+  // v1 saves (before combat) load fine: every unit becomes a player unit with no target.
+  if (!isObj(data) || (data.v !== 1 && data.v !== 2) || !isObj(data.state)) return { ok: false, error: 'Unsupported save version' };
   const s = data.state;
   const savedAt = num(data.savedAt) ?? 0;
 
@@ -71,7 +83,8 @@ export function parseSave(raw: string, mapSize: number): LoadResult {
     if (!def || ids.has(id)) return { ok: false, error: 'Save data is invalid' };
     if (x0 < 0 || z0 < 0 || x0 + def.w > mapSize || z0 + def.d > mapSize) return { ok: false, error: 'Save data is invalid' };
     ids.add(id);
-    buildings.push({ id, type, x0, z0, progress: clamp(progress, 0, 1) });
+    const hpRaw = num(b.hp);
+    buildings.push({ id, type, x0, z0, progress: clamp(progress, 0, 1), ...(hpRaw !== null ? { hp: clamp(hpRaw, 1, def.hp) } : {}) });
   }
 
   if (!Array.isArray(s.units) || s.units.length > MAX_UNITS) return { ok: false, error: 'Save data is invalid' };
@@ -95,12 +108,25 @@ export function parseSave(raw: string, mapSize: number): LoadResult {
       }
     }
     const cx = clamp(x, 0, mapSize - 1), cz = clamp(z, 0, mapSize - 1);
-    units.push({ id, kind, x: cx, z: cz, px: cx, pz: cz, facing, hp: clamp(hp, 1, def.hp), path });
+    const team = u.team === 1 ? 1 : 0;
+    const target = num(u.target);
+    units.push({
+      id, kind, x: cx, z: cz, px: cx, pz: cz, facing, hp: clamp(hp, 1, def.hp), path, team,
+      target: target !== null && Number.isInteger(target) ? target : null,
+      cooldown: clamp(num(u.cooldown) ?? 0, 0, def.attackInterval), repath: 0, scan: 0,
+      amove: u.amove === true, goal: parsePoint(u.goal, mapSize),
+    });
   }
 
+  let ai: GameState['ai'];
+  if (isObj(s.ai)) {
+    const wave = num(s.ai.wave), nextWave = num(s.ai.nextWave);
+    if (wave !== null && nextWave !== null) ai = { wave: clamp(Math.floor(wave), 0, 1000), nextWave: Math.max(0, nextWave) };
+  }
+  const outcome = s.outcome === 'victory' || s.outcome === 'defeat' ? s.outcome : undefined;
   const maxId = Math.max(0, ...ids);
   const nextId = Math.max(num(s.nextId) ?? 0, maxId + 1);
-  return { ok: true, savedAt, state: { version: 1, seed, time, resources, buildings, units, nextId } };
+  return { ok: true, savedAt, state: { version: 2, seed, time, resources, buildings, units, nextId, ...(ai ? { ai } : {}), ...(outcome ? { outcome } : {}) } };
 }
 
 export class SaveStore {
