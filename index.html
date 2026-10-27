@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- No inline script, no remote origins: everything the game needs ships from this origin. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://localhost:* ws://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="theme-color" content="#14264f" />
+    <title>PALAVA — Rise of an Ancient Kingdom</title>
+  </head>
+  <body>
+    <canvas id="game" tabindex="0" aria-label="Game world. Use WASD or arrow keys to pan, Q and E to rotate, plus and minus to zoom."></canvas>
+    <canvas id="bars" class="bars" aria-hidden="true"></canvas>
+    <div id="selbox" hidden></div>
+
+    <div id="hud" hidden>
+      <header class="topbar" aria-label="Kingdom status">
+        <h1 class="brand">PALAVA</h1>
+        <ul id="resources" class="resources" aria-label="Resources"></ul>
+        <div class="topbar-right">
+          <span id="pop" class="chip" title="Population / capacity"></span>
+          <span id="daytime" class="chip" title="Time of day"></span>
+          <span id="clock" class="chip" title="Time elapsed"></span>
+          <div class="speed" role="group" aria-label="Game speed">
+            <button id="btn-pause" type="button" aria-label="Pause (P)" title="Pause (P)"></button>
+            <button id="btn-1x" type="button" aria-label="Normal speed" title="Normal speed">1×</button>
+            <button id="btn-2x" type="button" aria-label="Double speed" title="Double speed">2×</button>
+            <button id="btn-sound" type="button" aria-label="Mute sound (M)" aria-pressed="false" title="Mute sound (M)"></button>
+            <button id="btn-menu" type="button" aria-label="Menu (Esc)" title="Menu (Esc)">☰</button>
+          </div>
+        </div>
+      </header>
+
+      <nav id="buildmenu" class="buildmenu" aria-label="Construction"></nav>
+
+      <section id="selpanel" class="selpanel" aria-label="Selection" aria-live="polite"></section>
+
+      <aside class="minimap-wrap" aria-label="Minimap">
+        <canvas id="minimap" role="img" aria-label="Minimap. Click or drag to move the camera."></canvas>
+      </aside>
+
+      <div id="pausebanner" class="pausebanner" hidden role="status">PAUSED — press P to resume</div>
+      <div id="stats" class="stats" aria-hidden="true"></div>
+      <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+    </div>
+
+    <div id="overlay" class="overlay" hidden>
+      <div class="panel" role="dialog" aria-modal="true" aria-labelledby="ov-title">
+        <h2 id="ov-title">PALAVA</h2>
+        <p id="ov-sub" class="sub">Rise of an Ancient Kingdom</p>
+
+        <div id="ov-main" class="stack">
+          <button id="ov-resume" type="button" class="primary" hidden>Resume</button>
+          <button id="ov-continue" type="button" class="primary" hidden>Continue</button>
+          <button id="ov-new" type="button">New Game</button>
+          <button id="ov-save" type="button" hidden>Save Game</button>
+          <button id="ov-load" type="button">Load Saved Game</button>
+          <button id="ov-settings" type="button">Settings</button>
+          <button id="ov-help" type="button">How to Play</button>
+        </div>
+
+        <div id="ov-settings-pane" class="stack" hidden>
+          <label>Graphics quality
+            <select id="set-quality">
+              <option value="low">Low (30 FPS target, no shadows)</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <label class="check"><input id="set-shadows" type="checkbox" /> Shadows</label>
+          <label class="check"><input id="set-adaptive" type="checkbox" /> Adaptive resolution</label>
+          <label class="check"><input id="set-daynight" type="checkbox" /> Day / night cycle</label>
+          <label class="check"><input id="set-weather" type="checkbox" /> Weather (light rain &amp; haze)</label>
+          <label class="check"><input id="set-sound" type="checkbox" /> Ambient sound</label>
+          <label class="check"><input id="set-motion" type="checkbox" /> Reduce motion</label>
+          <button id="set-back" type="button">Back</button>
+        </div>
+
+        <div id="ov-help-pane" class="stack help" hidden>
+          <ul>
+            <li><b>Select:</b> click a unit or drag a box (Shift adds).</li>
+            <li><b>Move:</b> right-click ground. Pick a formation in the bottom panel.</li>
+            <li><b>Build:</b> choose a building (1–5), click a green spot; Esc / right-click cancels.</li>
+            <li><b>Camera:</b> WASD / arrows pan, Q / E rotate, wheel or +/− zoom (zoom in far for an inspection view), middle-drag pans, H centres on the palace. M mutes sound.</li>
+            <li><b>Recruit:</b> select a finished Barracks, then Recruit.</li>
+            <li><b>Other:</b> P pause, Esc menu, F3 performance stats.</li>
+          </ul>
+          <button id="help-back" type="button">Back</button>
+        </div>
+        <p id="ov-note" class="note" role="status"></p>
+      </div>
+    </div>
+
+    <div id="fatal" class="fatal" hidden role="alert"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
