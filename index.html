@@ -23,6 +23,7 @@
         <ul id="resources" class="resources" aria-label="Resources"></ul>
         <div class="topbar-right">
           <span id="pop" class="chip" title="Population / capacity"></span>
+          <span id="workers" class="chip" title="Villagers working / worker slots. Right-click a farm, camp or quarry with villagers selected to assign them."></span>
           <span id="raid" class="chip raid" title="Next enemy raid" hidden></span>
           <span id="daytime" class="chip" title="Time of day"></span>
           <span id="clock" class="chip" title="Time elapsed"></span>
@@ -70,6 +71,13 @@
               <option value="low">Low (30 FPS target, no shadows)</option>
               <option value="medium">Medium</option>
               <option value="high">High</option>
+            </select>
+          </label>
+          <label>Rival difficulty (new games)
+            <select id="set-difficulty">
+              <option value="easy">Easy: slower raids, weaker economy</option>
+              <option value="normal">Normal</option>
+              <option value="hard">Hard: early raids, stronger economy</option>
             </select>
           </label>
           <label class="check"><input id="set-shadows" type="checkbox" /> Shadows</label>

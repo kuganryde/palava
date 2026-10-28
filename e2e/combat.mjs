@@ -36,8 +36,8 @@ await page.click('#ov-new');
 await page.waitForTimeout(1200);
 
 // 1. Rival base
-const base = await dbg(`({ fort: g.state.buildings.find((b) => b.type === 'stronghold') || null, foes: g.state.units.filter((u) => u.team === 1).length, ai: g.state.ai })`);
-check('enemy stronghold and garrison exist after a new game', !!base.fort && base.foes === 5 && !!base.ai, JSON.stringify({ x0: base.fort?.x0, z0: base.fort?.z0, foes: base.foes }));
+const base = await dbg(`({ fort: g.state.buildings.find((b) => b.type === 'stronghold') || null, foes: g.state.units.filter((u) => u.team === 1 && u.kind !== 'villager').length, workers: g.state.units.filter((u) => u.team === 1 && u.kind === 'villager').length, ai: g.state.ai })`);
+check('enemy stronghold and garrison exist after a new game', !!base.fort && base.foes === 5 && base.workers === 4 && !!base.ai, JSON.stringify({ x0: base.fort?.x0, z0: base.fort?.z0, foes: base.foes }));
 await dbg(`g.rig.setTarget(${base.fort.x0 + 3}, ${base.fort.z0 + 6}, true)`);
 await dbg('g.rig.setZoom(1.6, true)');
 await page.waitForTimeout(2500);
@@ -47,13 +47,13 @@ check('stronghold is rendered as a building model', drawn >= 2, `models=${drawn}
 
 // 2. Raid wave launches on schedule
 await dbg('(() => { g.state.time = g.state.ai.nextWave - 0.2; })()');
-check('a raid wave spawns at its scheduled time', await until(`g.state.ai.wave === 1 && g.state.units.filter((u) => u.team === 1).length >= 8`));
+check('a raid wave spawns at its scheduled time', await until(`g.state.ai.wave === 1 && g.state.units.filter((u) => u.team === 1 && u.amove).length >= 3`));
 
 // 3. Right-click an enemy orders an attack (selected player unit)
 await fresh();
 const setup = await dbg(`(() => {
   const cap = g.state.buildings[0]; const x = cap.x0 + 2, z = cap.z0 + 12;
-  g.state.units.length = 0;
+  g.state.units.length = 0; g.state.ai.bank = 0; // no workers and no points: the rival cannot field new units mid-test
   const a = { id: g.state.nextId++, kind: 'infantry', x, z, px: x, pz: z, facing: 0, hp: 100, path: [], team: 0, target: null, cooldown: 0 };
   const e = { id: g.state.nextId++, kind: 'infantry', x: x + 14, z, px: x + 14, pz: z, facing: 0, hp: 100, path: [], team: 1, target: null, cooldown: 0 };
   g.state.units.push(a, e); g.selectedUnits.clear(); g.selectedUnits.add(a.id);

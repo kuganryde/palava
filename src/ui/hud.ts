@@ -2,7 +2,7 @@ import {
   BUILDABLE, BUILDING_DEFS, RESOURCE_IDS, UNIT_DEFS,
   type BuildingType, type ResourceId, type Resources, type UnitKind,
 } from '../core/defs';
-import { canAfford, missingResources } from '../core/state';
+import { canAfford, missingResources, type Difficulty } from '../core/state';
 import { FORMATIONS, type FormationKind } from '../systems/formation';
 import type { Quality, Settings } from '../systems/settings';
 
@@ -28,7 +28,7 @@ export interface HudHandlers {
 export type SelectionInfo =
   | { kind: 'none' }
   | { kind: 'units'; counts: Partial<Record<UnitKind, number>>; avgHpFraction: number; moving: number; formation: FormationKind }
-  | { kind: 'building'; hpFraction: number; name: string; progress: number; description: string; recruit: { kind: UnitKind; enabled: boolean }[] | null };
+  | { kind: 'building'; hpFraction: number; name: string; progress: number; description: string; recruit: { kind: UnitKind; enabled: boolean }[] | null; workers: { on: number; slots: number } | null };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -71,6 +71,7 @@ export class Hud {
     $('ov-help').addEventListener('click', () => this.pane('help'));
     $('set-back').addEventListener('click', () => this.pane('main'));
     $('help-back').addEventListener('click', () => this.pane('main'));
+    $<HTMLSelectElement>('set-difficulty').addEventListener('change', (e) => h.onSettings({ difficulty: (e.target as HTMLSelectElement).value as Difficulty }));
     $<HTMLSelectElement>('set-quality').addEventListener('change', (e) => h.onSettings({ quality: (e.target as HTMLSelectElement).value as Quality }));
     $<HTMLInputElement>('set-shadows').addEventListener('change', (e) => h.onSettings({ shadows: (e.target as HTMLInputElement).checked }));
     $<HTMLInputElement>('set-adaptive').addEventListener('change', (e) => h.onSettings({ adaptiveResolution: (e.target as HTMLInputElement).checked }));
@@ -131,6 +132,16 @@ export class Hud {
     });
     const m = Math.floor(timeSeconds / 60), s = Math.floor(timeSeconds % 60);
     this.set('clock', `${m}:${s}`, () => { $('clock').textContent = `${m}:${String(s).padStart(2, '0')}`; });
+  }
+
+  /** Villager employment chip: staffed slots out of total, plus idle villagers (those without a post). */
+  setWorkers(on: number, slots: number, idle: number): void {
+    this.set('workers', `${on}|${slots}|${idle}`, () => {
+      const e = $('workers');
+      e.textContent = `Workers ${on}/${slots}${idle > 0 ? ` · ${idle} idle` : ''}`;
+      e.classList.toggle('warn', idle > 0 && slots > on);
+      e.setAttribute('aria-label', `${on} of ${slots} worker slots staffed${idle > 0 ? `, ${idle} idle villagers` : ''}`);
+    });
   }
 
   setBuildState(res: Resources, active: BuildingType | null): void {
@@ -199,7 +210,10 @@ export class Hud {
       const bar = el('div', 'bar build'); const fill = el('i'); fill.style.width = `${Math.round(info.progress * 100)}%`; bar.append(fill);
       row.append(el('span', 'muted', 'Under construction'), bar, el('span', 'muted', `${Math.round(info.progress * 100)}%`));
       p.append(row);
-    } else if (info.recruit) {
+    } else if (info.workers) {
+      p.append(el('span', undefined, `Workers ${info.workers.on}/${info.workers.slots}`), el('span', 'muted', 'Right-click with villagers selected to assign them here.'));
+    }
+    if (info.progress >= 1 && info.recruit) {
       const row = el('div', 'row');
       for (const r of info.recruit) {
         const def = UNIT_DEFS[r.kind];
@@ -276,6 +290,7 @@ export class Hud {
 
   syncSettings(s: Settings): void {
     $<HTMLSelectElement>('set-quality').value = s.quality;
+    $<HTMLSelectElement>('set-difficulty').value = s.difficulty;
     $<HTMLInputElement>('set-shadows').checked = s.shadows;
     $<HTMLInputElement>('set-adaptive').checked = s.adaptiveResolution;
     $<HTMLInputElement>('set-motion').checked = s.reducedMotion;

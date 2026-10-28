@@ -54,23 +54,23 @@ await page.screenshot({ path: `${OUT}/03-boxselect.png` });
 await page.mouse.up();
 await page.waitForTimeout(250);
 sel = await dbg('g.selectedUnits.size');
-check('drag box selects all 10 units', sel === 10, `selected=${sel}`);
+check('drag box selects all 16 units (10 soldiers + 6 villagers)', sel === 16, `selected=${sel}`);
 check('selection box element hidden after release', await page.locator('#selbox').isHidden());
 
 // ── 3. move command
-const before = await dbg('g.state.units.map(u => [u.x, u.z])');
+const before = await dbg('g.state.units.filter(u => (u.team ?? 0) === 0).map(u => [u.x, u.z])');
 const cap = await dbg('({x: Math.round(g.terrain.size*0.55), z: Math.round(g.terrain.size*0.58)})');
 const tgt = await dbg(`g.project(${cap.x - 10}, ${cap.z + 8})`);
 await page.click('#selpanel button:has-text("Wedge")');
 await page.mouse.click(tgt.x, tgt.y, { button: 'right' });
 await page.waitForTimeout(300);
-const pathing = await dbg('g.state.units.filter(u => u.path.length > 0).length');
-check('right-click gives paths to all selected units', pathing === 10, `${pathing} with paths`);
+const pathing = await dbg('g.state.units.filter(u => (u.team ?? 0) === 0 && u.path.length > 0).length');
+check('right-click gives paths to all selected units', pathing === 16, `${pathing} with paths`);
 await simWait(6);
-const after = await dbg('g.state.units.map(u => [u.x, u.z])');
+const after = await dbg('g.state.units.filter(u => (u.team ?? 0) === 0).map(u => [u.x, u.z])');
 const moved = after.filter((p, i) => Math.hypot(p[0] - before[i][0], p[1] - before[i][1]) > 3).length;
-check('units physically moved and arrived', moved >= 9, `${moved}/10 moved >3 cells`);
-const blockedNow = await dbg('g.state.units.filter(u => g.nav.blocked[Math.round(u.z)*g.nav.size+Math.round(u.x)]).length');
+check('units physically moved and arrived', moved >= 14, `${moved}/16 moved >3 cells`);
+const blockedNow = await dbg('g.state.units.filter(u => (u.team ?? 0) === 0 && g.nav.blocked[Math.round(u.z)*g.nav.size+Math.round(u.x)]).length');
 check('no unit ended in a blocked cell', blockedNow === 0);
 await page.screenshot({ path: `${OUT}/04-moved-wedge.png` });
 

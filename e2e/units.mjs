@@ -60,7 +60,7 @@ check('recruiting a villager adds a unit and charges food', (await dbg('g.state.
 // ── 2. every kind renders in every clip without errors
 const setup = await dbg(`(() => {
   const cap = g.state.buildings[0]; const ox = cap.x0 + 3, oz = cap.z0 + 12;
-  g.state.units.length = 0; const ids = {};
+  g.state.units.length = 0; if (g.state.ai) g.state.ai.bank = 0; const ids = {};
   ['infantry','archer','villager','commander','cavalry','elephant'].forEach((k, i) => {
     const x = ox + (i - 2.5) * 2.6, z = oz, id = g.state.nextId++;
     g.state.units.push({ id, kind: k, x, z, px: x, pz: z, facing: 0, hp: 100, path: [] }); ids[k] = id;
@@ -69,8 +69,10 @@ const setup = await dbg(`(() => {
   g.rig.setTarget(ox, oz, true); g.rig.setZoom(3.0, true);
   return ids; })()`);
 await page.waitForTimeout(600);
+// Poll rather than sleep: at ~5 fps in headless Chromium the view needs a few frames to catch up with the rival's workers spawning.
+const sixDrawn = await until('Object.values(g.unitsView.counts).reduce((a, b) => a + b, 0) === 6', 20000);
 const drawn = await dbg('Object.values(g.unitsView.counts).reduce((a, b) => a + b, 0)');
-check('all six unit kinds are drawn', drawn === 6, `drawn=${drawn}`);
+check('all six unit kinds are drawn', sixDrawn, `drawn=${drawn}`);
 for (const [name, clip] of [['idle', 0], ['walk', 1], ['run', 2], ['attack', 3], ['gather', 4], ['build', 5], ['death', 6]]) {
   await page.evaluate(({ ids, clip }) => { const d = window.__palava.debug(); Object.values(ids).forEach((id) => d.setClip(id, clip)); }, { ids: setup, clip });
   await until(`Object.values(${JSON.stringify(setup)}).every((id) => g.unitsView.controller.get(id).clip === ${clip})`);
@@ -81,7 +83,7 @@ await page.screenshot({ path: `${OUT}/units-death.png` });
 // Death is final in the controller, so respawn fresh units for the state-driven checks below.
 const setup2 = await dbg(`(() => {
   const cap = g.state.buildings[0]; const ox = cap.x0 + 3, oz = cap.z0 + 12;
-  g.state.units.length = 0; const ids = {};
+  g.state.units.length = 0; if (g.state.ai) g.state.ai.bank = 0; const ids = {};
   ['infantry','archer','villager','commander'].forEach((k, i) => {
     const x = ox + (i - 1.5) * 2.6, id = g.state.nextId++;
     g.state.units.push({ id, kind: k, x, z: oz, px: x, pz: oz, facing: 0, hp: 100, path: [] }); ids[k] = id;

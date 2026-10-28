@@ -3,7 +3,7 @@ import {
   type BuildingType, type UnitKind,
 } from '../core/defs';
 import {
-  canAfford, popCap, population, spend, startingResources, teamOf,
+  buildingTeam, canAfford, popCap, population, productionFactor, spend, startingResources, teamOf,
   type BuildingState, type GameState, type UnitState,
 } from '../core/state';
 import { capitalCenter, type Terrain } from '../world/terrain';
@@ -15,6 +15,7 @@ import { makeUnit } from './unitFactory';
 export { makeUnit };
 import { stepCombat } from './combat';
 import { stepAi } from './enemyAi';
+import { stepWorkers } from './economy';
 import { footprintCenter, validatePlacement, type PlacementResult } from './placement';
 
 /** Nav grid = terrain walkability + building footprints. Rebuilt after loading a save. */
@@ -27,6 +28,8 @@ export function buildNav(terrain: Terrain, state: GameState): NavGrid {
   return nav;
 }
 
+
+const START_VILLAGERS = 6;
 
 export function createNewGame(terrain: Terrain): { state: GameState; nav: NavGrid } {
   const state: GameState = {
@@ -47,6 +50,11 @@ export function createNewGame(terrain: Terrain): { state: GameState; nav: NavGri
     const spot = nearestWalkable(nav, slots[i]!.x, slots[i]!.z) ?? { x: cap.x, z: cap.z + 10 };
     state.units.push(makeUnit(state, kind, spot.x, spot.z));
   });
+  // A small starting workforce: villagers find work on their own once buildings are finished.
+  for (let i = 0; i < START_VILLAGERS; i++) {
+    const spot = nearestWalkable(nav, cap.x - 3 + i * 1.2, z0 - 2.5) ?? { x: cap.x, z: cap.z - 10 };
+    state.units.push(makeUnit(state, 'villager', spot.x, spot.z));
+  }
   return { state, nav };
 }
 
@@ -111,6 +119,7 @@ export function commandMove(
     const path = findPath(nav, u.x, u.z, slot.x, slot.z);
     u.target = null; // a move order cancels any attack order
     u.amove = false; u.goal = null;
+    if (u.kind === 'villager') { u.work = null; u.hold = true; } // manual control until given a work order
     if (path) { u.path = path; moved++; } else { u.path = []; }
   });
   return moved;
@@ -132,7 +141,7 @@ export function commandAttackMove(
 
 export function stopUnits(state: GameState, unitIds: Iterable<number>): void {
   const ids = new Set(unitIds);
-  for (const u of state.units) if (ids.has(u.id)) { u.path = []; u.target = null; u.amove = false; u.goal = null; }
+  for (const u of state.units) if (ids.has(u.id)) { u.path = []; u.target = null; u.amove = false; u.goal = null; if (u.kind === 'villager') { u.work = null; u.hold = true; } }
 }
 
 /** Advance the deterministic simulation by a fixed `dt`. */
@@ -140,18 +149,20 @@ export function stopUnits(state: GameState, unitIds: Iterable<number>): void {
 export function stepSimulation(state: GameState, dt: number, nav?: NavGrid): void {
   if (state.outcome) return; // the game is decided: nothing advances
   state.time += dt;
-  stepAi(state, nav);
+  stepAi(state, nav, dt);
 
   for (const b of state.buildings) {
     if (b.progress < 1) b.progress = Math.min(1, b.progress + dt / BUILDING_DEFS[b.type].buildTime);
   }
 
+  stepWorkers(state, nav);
   for (const b of state.buildings) {
-    if (b.progress < 1) continue;
+    if (b.progress < 1 || buildingTeam(b) !== 0) continue;
     const p = BUILDING_DEFS[b.type].produces;
+    const f = productionFactor(state, b); // villagers on site decide the rate
     for (const r of RESOURCE_IDS) {
       const rate = p[r];
-      if (rate) state.resources[r] = Math.min(RESOURCE_CAP, state.resources[r] + rate * dt);
+      if (rate) state.resources[r] = Math.min(RESOURCE_CAP, state.resources[r] + rate * f * dt);
     }
   }
 

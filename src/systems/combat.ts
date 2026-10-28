@@ -1,4 +1,4 @@
-import { BUILDING_DEFS, UNIT_DEFS } from '../core/defs';
+import { BUILDING_DAMAGE, BUILDING_DEFS, UNIT_DEFS, counterFactor } from '../core/defs';
 import {
   buildingHp, buildingTeam, isAlive, teamOf,
   type BuildingState, type CombatEvent, type GameState, type Team, type UnitState,
@@ -166,11 +166,11 @@ export function stepCombat(state: GameState, nav: NavGrid | undefined, dt: numbe
         u.cooldown = def.attackInterval;
         let killed: boolean;
         if (target.kind === 'unit') {
-          target.unit.hp = Math.max(0, target.unit.hp - def.damage);
+          target.unit.hp = Math.max(0, target.unit.hp - def.damage * counterFactor(u.kind, target.unit.kind));
           killed = target.unit.hp <= 0;
         } else {
           // Archers do little against stone: buildings take reduced damage from ranged units.
-          const dmg = def.range > 3 ? def.damage * 0.5 : def.damage;
+          const dmg = (def.range > 3 ? def.damage * 0.5 : def.damage) * (BUILDING_DAMAGE[u.kind] ?? 1);
           target.building.hp = Math.max(0, buildingHp(target.building) - dmg);
           killed = target.building.hp <= 0;
         }

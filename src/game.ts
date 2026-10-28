@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { BUILDABLE, BUILDING_DEFS, MAX_UNITS, SIM_STEP, TRAINABLE, UNIT_DEFS, type BuildingType, type UnitKind } from './core/defs';
-import { buildingHp, canAfford, incomePerSecond, isAlive, popCap, population, teamOf, type GameState, type Team } from './core/state';
+import { buildingHp, canAfford, incomePerSecond, isAlive, popCap, population, teamOf, workersOnSite, type GameState, type Team } from './core/state';
 import { commandAttack } from './systems/combat';
+import { loadBuildingManifest } from './render/buildingGltf';
+import { commandWork } from './systems/economy';
 import { addEnemyBase } from './systems/enemyAi';
 import { InputController } from './input';
 import { BuildingsView } from './render/buildingsView';
@@ -224,7 +226,7 @@ export class Game {
 
   private newGame(): void {
     const g = createNewGame(this.terrain);
-    addEnemyBase(g.state, this.terrain, g.nav); // rival stronghold + garrison; raids start after a grace period
+    addEnemyBase(g.state, this.terrain, g.nav, this.settings.difficulty); // rival stronghold + garrison; raids start after a grace period
     this.setWorld(g);
     this.autosaveTimer = 0;
     this.startPlaying();
@@ -240,7 +242,7 @@ export class Game {
     }
     const g = { state: r.state, nav: buildNav(this.terrain, r.state) };
     // Saves from before the rival existed get one now (unless the game was already decided).
-    const rivalAdded = !g.state.outcome && !g.state.buildings.some((b) => b.type === 'stronghold') && addEnemyBase(g.state, this.terrain, g.nav);
+    const rivalAdded = !g.state.outcome && !g.state.buildings.some((b) => b.type === 'stronghold') && addEnemyBase(g.state, this.terrain, g.nav, this.settings.difficulty);
     this.setWorld(g);
     this.autosaveTimer = 0;
     this.startPlaying();
@@ -417,6 +419,21 @@ export class Game {
       if (commandAttack(this.state, this.selectedUnits, foe) === 0) this.hud.toast('Your units cannot attack that', 'error');
       return;
     }
+    // Right-clicking a farm, camp or quarry sends selected villagers to work there.
+    const n = this.ndc(x, y);
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2(n.x, n.y), this.rig.camera);
+    const bid = this.buildingsView.pick(rc);
+    if (bid !== null) {
+      const wb = this.state.buildings.find((b) => b.id === bid);
+      if (wb && BUILDING_DEFS[wb.type].slots > 0 && wb.type !== 'stronghold') {
+        if (wb.progress < 1) { this.hud.toast('Wait for it to be finished', 'info'); return; }
+        const sent = commandWork(this.state, this.nav, this.selectedUnits, bid);
+        if (sent === 0) this.hud.toast('Select villagers to put them to work', 'error');
+        else this.hud.toast(`${sent} villager${sent === 1 ? '' : 's'} assigned to the ${BUILDING_DEFS[wb.type].name}`, 'good');
+        return;
+      }
+    }
     const g = this.pickGround(x, y);
     if (!g) return;
     const moved = commandMove(this.state, this.nav, this.selectedUnits, g, this.formation);
@@ -535,6 +552,7 @@ export class Game {
       const full = population(this.state) >= Math.min(popCap(this.state), MAX_UNITS);
       return {
         kind: 'building', hpFraction: buildingHp(b) / def.hp, name: def.name, description: def.description, progress: Math.round(b.progress * 100) / 100,
+        workers: def.slots > 0 && b.progress >= 1 ? { on: workersOnSite(this.state, b), slots: def.slots } : null,
         recruit: TRAINABLE[b.type] && b.progress >= 1
           ? TRAINABLE[b.type]!.map((k) => ({ kind: k, enabled: !full && canAfford(this.state.resources, UNIT_DEFS[k].cost) }))
           : null,
@@ -552,6 +570,13 @@ export class Game {
       for (const id of this.selectedUnits) if (!alive.has(id)) this.selectedUnits.delete(id);
     }
     this.hud.setResources(this.state.resources, incomePerSecond(this.state), population(this.state), popCap(this.state), this.state.time);
+    let on = 0, slots = 0, idle = 0;
+    for (const b of this.state.buildings) {
+      const sl = BUILDING_DEFS[b.type].slots;
+      if (sl > 0 && b.progress >= 1 && b.type !== 'stronghold') { slots += sl; on += Math.min(sl, workersOnSite(this.state, b)); }
+    }
+    for (const u of this.state.units) if (u.kind === 'villager' && isAlive(u) && teamOf(u) === 0 && u.work == null) idle++;
+    this.hud.setWorkers(on, slots, idle);
     const ai = this.state.ai;
     if (ai && !this.state.outcome && this.state.buildings.some((b) => b.type === 'stronghold')) {
       const left = Math.max(0, Math.ceil(ai.nextWave - this.state.time));
@@ -696,6 +721,16 @@ export class Game {
    */
   private loadModelsFromUrl(): void {
     const manifest = new URLSearchParams(location.search).get('models');
+    // Building models: the explicit manifest if given, otherwise our own optional /models/buildings.json.
+    // A missing default file is normal (nothing is shipped unless someone adds it), so it stays silent.
+    const explicit = manifest !== null;
+    loadBuildingManifest(manifest ?? 'models/buildings.json').then(
+      (r) => {
+        if (r.failed.length) console.warn('Some building models failed to load; using procedural models for them:', r.failed);
+        if (r.loaded.length) { console.info(`Loaded authored building models: ${r.loaded.join(', ')}`); this.buildingsView.refreshModels(); }
+      },
+      (e) => { if (explicit) console.warn('Building manifest failed; using procedural models.', e instanceof Error ? e.message : e); },
+    );
     if (!manifest) return;
     loadUnitManifest(manifest, this.unitAssets).then(
       (r) => {

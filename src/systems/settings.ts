@@ -1,3 +1,4 @@
+import type { Difficulty } from '../core/state';
 import type { KeyValueStore } from './save';
 
 export type Quality = 'low' | 'medium' | 'high';
@@ -13,6 +14,8 @@ export interface Settings {
   weather: boolean;
   /** Procedural ambient sound (starts only after a user gesture). */
   sound: boolean;
+  /** Rival strength for new games (income, pace and head start; unit stats never change). */
+  difficulty: Difficulty;
 }
 
 export interface QualityPreset {
@@ -39,7 +42,7 @@ export const QUALITY_PRESETS: Record<Quality, QualityPreset> = {
 const SETTINGS_KEY = 'palava.settings.v1';
 
 export function defaultSettings(prefersReducedMotion = false): Settings {
-  return { quality: 'medium', shadows: true, adaptiveResolution: true, reducedMotion: prefersReducedMotion, dayNight: true, weather: true, sound: true };
+  return { quality: 'medium', shadows: true, adaptiveResolution: true, reducedMotion: prefersReducedMotion, dayNight: true, weather: true, sound: true, difficulty: 'normal' };
 }
 
 export function loadSettings(store: KeyValueStore | null, fallback: Settings): Settings {
@@ -58,6 +61,7 @@ export function loadSettings(store: KeyValueStore | null, fallback: Settings): S
       dayNight: typeof o.dayNight === 'boolean' ? o.dayNight : fallback.dayNight,
       weather: typeof o.weather === 'boolean' ? o.weather : fallback.weather,
       sound: typeof o.sound === 'boolean' ? o.sound : fallback.sound,
+      difficulty: o.difficulty === 'easy' || o.difficulty === 'normal' || o.difficulty === 'hard' ? o.difficulty : fallback.difficulty,
     };
   } catch {
     return fallback;

@@ -170,6 +170,13 @@ export class BuildingsView {
     this.ghost.obj.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.material = material; });
   }
 
+  /** Rebuild every model, e.g. after an authored model was registered; the next sync recreates them. */
+  refreshModels(): void {
+    for (const e of this.models.values()) this.remove(e);
+    this.models.clear();
+    if (this.ghost) { this.group.remove(this.ghost.obj); this.ghost = null; }
+  }
+
   /** Release per-building GPU resources (shared geometry/textures are owned by the model cache). */
   dispose(): void {
     for (const e of this.models.values()) this.remove(e);

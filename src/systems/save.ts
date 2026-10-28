@@ -3,7 +3,7 @@ import {
   type BuildingType, type UnitKind,
 } from '../core/defs';
 import { clamp } from '../core/math';
-import { emptyResources, teamOf, type BuildingState, type GameState, type UnitState } from '../core/state';
+import { DIFFICULTIES, emptyResources, teamOf, type BuildingState, type Difficulty, type GameState, type UnitState } from '../core/state';
 
 /** Minimal Storage contract so tests can inject an in-memory implementation. */
 export interface KeyValueStore {
@@ -28,7 +28,7 @@ export function serializeState(state: GameState, savedAt = Date.now()): string {
     // Corpses are not worth saving; targets/cooldowns are so a fight resumes where it stopped.
     units: state.units.filter((u) => u.hp > 0).map((u) => ({
       id: u.id, kind: u.kind, x: u.x, z: u.z, facing: u.facing, hp: u.hp, path: u.path,
-      team: teamOf(u), target: u.target ?? null, cooldown: u.cooldown ?? 0, amove: u.amove === true, goal: u.goal ?? null,
+      team: teamOf(u), target: u.target ?? null, cooldown: u.cooldown ?? 0, amove: u.amove === true, goal: u.goal ?? null, work: u.work ?? null, hold: u.hold === true,
     })),
   };
   return JSON.stringify({ v: 2, savedAt, state: slim });
@@ -40,6 +40,7 @@ function parsePoint(v: unknown, mapSize: number): { x: number; z: number } | nul
   const x = num(v.x), z = num(v.z);
   return x === null || z === null ? null : { x: clamp(x, 0, mapSize - 1), z: clamp(z, 0, mapSize - 1) };
 }
+const workId = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null);
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 /**
@@ -115,13 +116,23 @@ export function parseSave(raw: string, mapSize: number): LoadResult {
       target: target !== null && Number.isInteger(target) ? target : null,
       cooldown: clamp(num(u.cooldown) ?? 0, 0, def.attackInterval), repath: 0, scan: 0,
       amove: u.amove === true, goal: parsePoint(u.goal, mapSize),
+      ...(kind === 'villager' ? { work: workId(u.work), hold: u.hold === true } : {}),
     });
   }
 
   let ai: GameState['ai'];
   if (isObj(s.ai)) {
     const wave = num(s.ai.wave), nextWave = num(s.ai.nextWave);
-    if (wave !== null && nextWave !== null) ai = { wave: clamp(Math.floor(wave), 0, 1000), nextWave: Math.max(0, nextWave) };
+    if (wave !== null && nextWave !== null) {
+      const diff = typeof s.ai.difficulty === 'string' && (DIFFICULTIES as readonly string[]).includes(s.ai.difficulty) ? (s.ai.difficulty as Difficulty) : 'normal';
+      // Raid ids must be integers; the list is bounded so a tampered save cannot bloat it.
+      const raid = Array.isArray(s.ai.raid) ? s.ai.raid.filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0).slice(0, 64) : [];
+      ai = {
+        wave: clamp(Math.floor(wave), 0, 1000), nextWave: Math.max(0, nextWave), difficulty: diff,
+        bank: clamp(num(s.ai.bank) ?? 0, 0, 5000), raid, raidSize: clamp(Math.floor(num(s.ai.raidSize) ?? raid.length), 0, 64),
+        nextBuy: Math.max(0, num(s.ai.nextBuy) ?? 0), check: Math.max(0, num(s.ai.check) ?? 0),
+      };
+    }
   }
   const outcome = s.outcome === 'victory' || s.outcome === 'defeat' ? s.outcome : undefined;
   const maxId = Math.max(0, ...ids);

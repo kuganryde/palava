@@ -108,3 +108,11 @@ tests/          unit tests                       e2e/run.mjs    browser test
 ```
 
 Game logic never touches Three.js, so it is unit-testable and can later move to a worker or a server.
+
+## Stage 10: worker economy, rival economy, counters
+
+- **Workers.** Farms (3 slots), lumber camps (2), quarries (2) and temples (1) produce in proportion to villagers standing at them, plus a 25% idle trickle. Idle villagers pick the nearest free workplace by themselves; right-click a workplace with villagers selected to assign them. A manual move holds a villager until you give a work order. The game starts with 6 villagers.
+- **Rival economy.** The enemy stronghold has its own workers that earn points; it buys workers, then the soldiers for its next wave, and launches its garrison on schedule (keeping two guards home). Raids sweep the nearest player building first (economy before palace) and retreat when fewer than 40% survive. Kill its workers and it stops growing.
+- **Difficulty** (Settings, applies to new games): Easy / Normal / Hard change the rival's income, first-raid time, wave gap and head start. Unit stats are identical on every level.
+- **Counters.** Sword warriors beat cavalry, cavalry ride down archers, archers shoot infantry and elephants; elephants deal double damage to buildings.
+- **Authored buildings.** Put a GLB at `public/models/` and list it in `public/models/buildings.json` as `{ "buildings": { "temple": "temple.glb" } }`. It is scaled to the footprint and loaded automatically (same origin only, 120k-triangle limit); a missing or rejected file keeps the procedural model.

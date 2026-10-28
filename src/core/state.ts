@@ -1,5 +1,5 @@
 import {
-  BUILDING_DEFS, RESOURCE_IDS, START_RESOURCES,
+  BUILDING_DEFS, IDLE_TRICKLE, RESOURCE_IDS, START_RESOURCES, WORK_RADIUS,
   type BuildingType, type ResourceId, type Resources, type UnitKind,
 } from './defs';
 
@@ -43,13 +43,29 @@ export interface UnitState {
   scan?: number;
   /** Sim time of death; the corpse is removed shortly after. */
   diedAt?: number;
+  /** Villagers: id of the building they work at. */
+  work?: number | null;
+  /** Villagers: player-controlled; never auto-assigned until given a work order. */
+  hold?: boolean;
 }
+
+export type Difficulty = 'easy' | 'normal' | 'hard';
+export const DIFFICULTIES: readonly Difficulty[] = ['easy', 'normal', 'hard'];
 
 export interface AiState {
   /** Index of the next raid wave. */
   wave: number;
   /** Sim time at which it launches. */
   nextWave: number;
+  difficulty: Difficulty;
+  /** Spendable points earned by the rival's workers. */
+  bank: number;
+  /** Unit ids of the raid currently out in the field, and how many set out. */
+  raid: number[];
+  raidSize: number;
+  /** Earliest sim time of the next purchase and of the next raid review. */
+  nextBuy: number;
+  check: number;
 }
 
 export type Outcome = 'victory' | 'defeat';
@@ -108,13 +124,38 @@ export function popCap(state: GameState): number {
   return cap;
 }
 
-/** Per-second income from completed buildings (before storage caps). */
+/** Distance from a point to the nearest point of a building footprint (0 when inside). */
+export function distToFootprint(x: number, z: number, b: BuildingState): number {
+  const def = BUILDING_DEFS[b.type];
+  const cx = Math.min(Math.max(x, b.x0 - 0.5), b.x0 + def.w - 0.5);
+  const cz = Math.min(Math.max(z, b.z0 - 0.5), b.z0 + def.d - 0.5);
+  return Math.hypot(x - cx, z - cz);
+}
+
+/** Living player villagers assigned to `b` and standing at it. */
+export function workersOnSite(state: GameState, b: BuildingState): number {
+  let n = 0;
+  for (const u of state.units) {
+    if (u.work === b.id && u.kind === 'villager' && isAlive(u) && teamOf(u) === 0 && distToFootprint(u.x, u.z, b) <= WORK_RADIUS) n++;
+  }
+  return n;
+}
+
+/** Output multiplier for a finished building: full for worker-less buildings, else trickle plus staffing. */
+export function productionFactor(state: GameState, b: BuildingState): number {
+  const slots = BUILDING_DEFS[b.type].slots;
+  if (slots <= 0) return 1;
+  return IDLE_TRICKLE + (1 - IDLE_TRICKLE) * Math.min(1, workersOnSite(state, b) / slots);
+}
+
+/** Per-second income from completed buildings (before storage caps), scaled by staffing. */
 export function incomePerSecond(state: GameState): Resources {
   const out = emptyResources();
   for (const b of state.buildings) {
-    if (b.progress < 1) continue;
+    if (b.progress < 1 || buildingTeam(b) !== 0) continue;
     const p = BUILDING_DEFS[b.type].produces;
-    for (const r of RESOURCE_IDS) out[r] += p[r] ?? 0;
+    const f = productionFactor(state, b);
+    for (const r of RESOURCE_IDS) out[r] += (p[r] ?? 0) * f;
   }
   return out;
 }

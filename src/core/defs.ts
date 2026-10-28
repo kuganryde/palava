@@ -4,6 +4,11 @@ export const RESOURCE_IDS = ['food', 'timber', 'stone', 'iron', 'gold'] as const
 export type ResourceId = (typeof RESOURCE_IDS)[number];
 export type Resources = Record<ResourceId, number>;
 
+/** A staffed-out building still yields this fraction of its rate, so a fresh start is never dead. */
+export const IDLE_TRICKLE = 0.25;
+/** A villager counts as working when within this many cells of the building footprint. */
+export const WORK_RADIUS = 2.6;
+
 export const RESOURCE_CAP = 2000;
 export const MAX_UNITS = 200; // hard entity limit (also sizes the instanced meshes)
 export const MAX_BUILDINGS = 120;
@@ -21,6 +26,8 @@ export interface BuildingDef {
   buildTime: number; // seconds
   produces: Partial<Resources>; // per second once complete
   housing: number; // population capacity contributed once complete
+  /** Worker slots. Output scales with villagers on site; 0 means the building produces without workers. */
+  slots: number;
   /** Hit points; a building at 0 is destroyed. */
   hp: number;
   unique?: boolean;
@@ -29,31 +36,31 @@ export interface BuildingDef {
 export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
   palace: {
     type: 'palace', name: 'Palace', description: 'Seat of the Pallava ruler. Collects royal tribute.',
-    w: 6, d: 6, cost: {}, buildTime: 1, produces: { gold: 0.6 }, housing: 20, hp: 1500, unique: true,
+    w: 6, d: 6, cost: {}, buildTime: 1, produces: { gold: 0.6 }, housing: 20, slots: 0, hp: 1500, unique: true,
   },
   temple: {
     type: 'temple', name: 'Temple', description: 'Stone vimana. Offerings yield gold.',
-    w: 5, d: 5, cost: { stone: 120, gold: 80 }, buildTime: 25, produces: { gold: 0.4 }, housing: 4, hp: 500,
+    w: 5, d: 5, cost: { stone: 120, gold: 80 }, buildTime: 25, produces: { gold: 0.4 }, housing: 4, slots: 1, hp: 500,
   },
   barracks: {
     type: 'barracks', name: 'Barracks', description: 'Recruit infantry and archers.',
-    w: 4, d: 3, cost: { timber: 100, stone: 40 }, buildTime: 18, produces: {}, housing: 6, hp: 450,
+    w: 4, d: 3, cost: { timber: 100, stone: 40 }, buildTime: 18, produces: {}, housing: 6, slots: 0, hp: 450,
   },
   farm: {
     type: 'farm', name: 'Farm', description: 'Paddy fields producing food.',
-    w: 4, d: 4, cost: { timber: 60 }, buildTime: 10, produces: { food: 1.2 }, housing: 2, hp: 250,
+    w: 4, d: 4, cost: { timber: 60 }, buildTime: 10, produces: { food: 1.2 }, housing: 2, slots: 3, hp: 250,
   },
   lumber: {
     type: 'lumber', name: 'Lumber Camp', description: 'Fells timber.',
-    w: 3, d: 3, cost: { timber: 30, gold: 10 }, buildTime: 8, produces: { timber: 1.0 }, housing: 0, hp: 200,
+    w: 3, d: 3, cost: { timber: 30, gold: 10 }, buildTime: 8, produces: { timber: 1.0 }, housing: 0, slots: 2, hp: 200,
   },
   quarry: {
     type: 'quarry', name: 'Quarry', description: 'Cuts sandstone and granite.',
-    w: 3, d: 3, cost: { timber: 50 }, buildTime: 12, produces: { stone: 0.8 }, housing: 0, hp: 250,
+    w: 3, d: 3, cost: { timber: 50 }, buildTime: 12, produces: { stone: 0.8 }, housing: 0, slots: 2, hp: 250,
   },
   stronghold: {
     type: 'stronghold', name: 'Enemy Stronghold', description: 'The rival kingdom\'s fortress. Destroy it to win.',
-    w: 7, d: 7, cost: {}, buildTime: 1, produces: {}, housing: 0, hp: 1400, unique: true,
+    w: 7, d: 7, cost: {}, buildTime: 1, produces: {}, housing: 0, slots: 0, hp: 1400, unique: true,
   },
 };
 
@@ -102,3 +109,19 @@ export function formationSpacing(kinds: Iterable<UnitKind>): number {
 }
 
 export const START_RESOURCES: Resources = { food: 300, timber: 300, stone: 150, iron: 0, gold: 200 };
+
+/**
+ * Damage multipliers (attacker -> defender). Missing pairs are 1. The triangle: sword warriors beat cavalry,
+ * cavalry ride down archers, archers shoot down infantry; elephants shrug off swords and smash buildings.
+ */
+export const COUNTERS: Partial<Record<UnitKind, Partial<Record<UnitKind, number>>>> = {
+  infantry: { cavalry: 1.5, elephant: 0.75 },
+  cavalry: { archer: 1.6, infantry: 0.8 },
+  archer: { infantry: 1.25, elephant: 1.3, cavalry: 0.8 },
+  elephant: { infantry: 1.2 },
+};
+
+/** Damage multiplier against buildings, by attacker (archers also take the existing ranged penalty). */
+export const BUILDING_DAMAGE: Partial<Record<UnitKind, number>> = { elephant: 2, cavalry: 0.6, villager: 0.25 };
+
+export const counterFactor = (attacker: UnitKind, defender: UnitKind): number => COUNTERS[attacker]?.[defender] ?? 1;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BUILDING_DEFS, MAX_UNITS, SIM_STEP, UNIT_DEFS } from '../src/core/defs';
+import { BUILDING_DEFS, IDLE_TRICKLE, MAX_UNITS, SIM_STEP, UNIT_DEFS } from '../src/core/defs';
 import { incomePerSecond, popCap } from '../src/core/state';
 import { capitalCenter, generateTerrain } from '../src/world/terrain';
 import { isBlocked } from '../src/systems/pathfinding';
@@ -22,15 +22,16 @@ function findSpot(type: Parameters<typeof placeBuilding>[3], state: ReturnType<t
 }
 
 describe('new game', () => {
-  it('has a pre-built palace, 10 walkable units and starting resources', () => {
+  it('has a pre-built palace, 10 soldiers, 6 villagers and starting resources', () => {
     const { state, nav } = fresh();
     expect(state.buildings).toHaveLength(1);
     expect(state.buildings[0]!.type).toBe('palace');
     expect(state.buildings[0]!.progress).toBe(1);
-    expect(state.units).toHaveLength(10);
+    expect(state.units).toHaveLength(16);
+    expect(state.units.filter((u) => u.kind === 'villager')).toHaveLength(6);
     for (const u of state.units) expect(isBlocked(nav, u.x, u.z)).toBe(false);
     expect(state.resources.gold).toBeGreaterThan(0);
-    expect(new Set([...state.units.map((u) => u.id), ...state.buildings.map((b) => b.id)]).size).toBe(11);
+    expect(new Set([...state.units.map((u) => u.id), ...state.buildings.map((b) => b.id)]).size).toBe(17);
   });
 });
 
@@ -95,7 +96,8 @@ describe('construction and economy', () => {
     expect(state.resources.food).toBeGreaterThan(foodMid); // palace gold + farm food
     const before = state.resources.food;
     for (let i = 0; i < 20; i++) stepSimulation(state, SIM_STEP); // 1 second
-    expect(state.resources.food - before).toBeCloseTo(BUILDING_DEFS.farm.produces.food!, 1);
+    // No nav is passed here, so nobody is assigned: an unstaffed farm yields only the idle trickle.
+    expect(state.resources.food - before).toBeCloseTo(BUILDING_DEFS.farm.produces.food! * IDLE_TRICKLE, 1);
   });
 
   it('income and population cap only count completed buildings', () => {
