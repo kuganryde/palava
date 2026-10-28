@@ -42,7 +42,7 @@ jobs:
         run: npm run test:e2e
       - name: Upload screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-screenshots
           path: e2e/artifacts/*.png
@@ -63,7 +63,7 @@ jobs:
         run: npm audit --audit-level=high
       - name: Generate SBOM (CycloneDX)
         run: npx --yes @cyclonedx/cyclonedx-npm --omit dev --output-file sbom.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: sbom.json
