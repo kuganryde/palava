@@ -16,6 +16,8 @@ export interface Settings {
   sound: boolean;
   /** Rival strength for new games (income, pace and head start; unit stats never change). */
   difficulty: Difficulty;
+  /** Play the opening cinematic before new games. */
+  intro: boolean;
 }
 
 export interface QualityPreset {
@@ -42,7 +44,7 @@ export const QUALITY_PRESETS: Record<Quality, QualityPreset> = {
 const SETTINGS_KEY = 'palava.settings.v1';
 
 export function defaultSettings(prefersReducedMotion = false): Settings {
-  return { quality: 'medium', shadows: true, adaptiveResolution: true, reducedMotion: prefersReducedMotion, dayNight: true, weather: true, sound: true, difficulty: 'normal' };
+  return { quality: 'medium', shadows: true, adaptiveResolution: true, reducedMotion: prefersReducedMotion, dayNight: true, weather: true, sound: true, difficulty: 'normal', intro: true };
 }
 
 export function loadSettings(store: KeyValueStore | null, fallback: Settings): Settings {
@@ -61,6 +63,7 @@ export function loadSettings(store: KeyValueStore | null, fallback: Settings): S
       dayNight: typeof o.dayNight === 'boolean' ? o.dayNight : fallback.dayNight,
       weather: typeof o.weather === 'boolean' ? o.weather : fallback.weather,
       sound: typeof o.sound === 'boolean' ? o.sound : fallback.sound,
+      intro: typeof o.intro === 'boolean' ? o.intro : fallback.intro,
       difficulty: o.difficulty === 'easy' || o.difficulty === 'normal' || o.difficulty === 'hard' ? o.difficulty : fallback.difficulty,
     };
   } catch {

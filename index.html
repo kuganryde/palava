@@ -48,6 +48,20 @@
       <div id="pausebanner" class="pausebanner" hidden role="status">PAUSED — press P to resume</div>
       <div id="stats" class="stats" aria-hidden="true"></div>
       <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+      <aside id="story" class="story" hidden role="status" aria-live="polite">
+        <h3 id="story-title"></h3>
+        <p id="story-text"></p>
+        <button id="story-close" type="button" aria-label="Dismiss story">×</button>
+      </aside>
+    </div>
+
+    <div id="intro" class="intro" hidden role="dialog" aria-modal="true" aria-label="Introduction" tabindex="-1">
+      <div class="bar top"></div>
+      <div class="bar bottom"></div>
+      <p id="intro-line" class="intro-line"><span id="intro-sr" class="sr-only"></span><span id="intro-typed" aria-hidden="true"></span></p>
+      <h1 id="intro-title" class="intro-title" hidden>PALAVA</h1>
+      <p id="intro-sub" class="intro-sub" hidden>Rise of an Ancient Kingdom</p>
+      <button id="intro-skip" type="button">Skip ▸ <small>(Esc)</small></button>
     </div>
 
     <div id="overlay" class="overlay" hidden>
@@ -61,6 +75,8 @@
           <button id="ov-new" type="button">New Game</button>
           <button id="ov-save" type="button" hidden>Save Game</button>
           <button id="ov-load" type="button">Load Saved Game</button>
+          <button id="ov-chronicle" type="button">Chronicle</button>
+          <button id="ov-intro" type="button">Watch Intro</button>
           <button id="ov-settings" type="button">Settings</button>
           <button id="ov-help" type="button">How to Play</button>
         </div>
@@ -84,9 +100,15 @@
           <label class="check"><input id="set-adaptive" type="checkbox" /> Adaptive resolution</label>
           <label class="check"><input id="set-daynight" type="checkbox" /> Day / night cycle</label>
           <label class="check"><input id="set-weather" type="checkbox" /> Weather (light rain &amp; haze)</label>
+          <label class="check"><input id="set-intro" type="checkbox" /> Play the intro before new games</label>
           <label class="check"><input id="set-sound" type="checkbox" /> Ambient sound</label>
           <label class="check"><input id="set-motion" type="checkbox" /> Reduce motion</label>
           <button id="set-back" type="button">Back</button>
+        </div>
+
+        <div id="ov-chronicle-pane" class="stack help" hidden>
+          <ol id="chronicle-list" class="chronicle"></ol>
+          <button id="chronicle-back" type="button">Back</button>
         </div>
 
         <div id="ov-help-pane" class="stack help" hidden>

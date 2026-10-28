@@ -3,6 +3,8 @@ import { BUILDABLE, BUILDING_DEFS, MAX_UNITS, SIM_STEP, TRAINABLE, UNIT_DEFS, ty
 import { buildingHp, canAfford, incomePerSecond, isAlive, popCap, population, teamOf, workersOnSite, type GameState, type Team } from './core/state';
 import { commandAttack } from './systems/combat';
 import { loadBuildingManifest } from './render/buildingGltf';
+import { INTRO_SECONDS, TITLE_FROM, introShot, lineAt, revealed } from './story/intro';
+import { beatById, markSeen, newBeats } from './story/story';
 import { commandWork } from './systems/economy';
 import { addEnemyBase } from './systems/enemyAi';
 import { InputController } from './input';
@@ -90,6 +92,10 @@ export class Game {
   private readonly clock = new THREE.Clock(false);
   private readonly audio = new AmbientAudio();
   private outcomeShown = false;
+  private introActive = false;
+  private introT = 0;
+  private introDone: (() => void) | null = null;
+  private introCamera: { x: number; z: number; zoom: number; yaw: number } | null = null;
   private readonly fx: CombatFx;
   private attackMoveArmed = false;
   private readonly groups = new Map<number, number[]>();
@@ -143,6 +149,8 @@ export class Game {
       onLoad: () => this.loadManual(),
       onSettings: (s) => this.changeSettings(s),
       onSoundToggle: () => this.changeSettings({ sound: !this.settings.sound }),
+      onWatchIntro: () => this.watchIntro(),
+      onIntroSkip: () => this.endIntro(),
     });
     this.minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, this.terrain, (x, z) => this.rig.setTarget(x, z, false));
     this.input = new InputController(canvas, this.rig, {
@@ -196,6 +204,8 @@ export class Game {
     this.acc = 0;
     this.alpha = 1;
     this.outcomeShown = false;
+    this.hud.clearStory();
+    this.syncChronicle();
     this.attackMoveArmed = false;
     this.canvas.style.cursor = '';
     this.groups.clear();
@@ -229,8 +239,77 @@ export class Game {
     addEnemyBase(g.state, this.terrain, g.nav, this.settings.difficulty); // rival stronghold + garrison; raids start after a grace period
     this.setWorld(g);
     this.autosaveTimer = 0;
-    this.startPlaying();
-    this.hud.toast('A new kingdom begins. Build, recruit, and explore.', 'good');
+    const begin = (): void => {
+      this.startPlaying();
+      this.hud.toast('A new kingdom begins. Build, recruit, and explore.', 'good');
+    };
+    if (this.settings.intro) this.playIntro(begin); else begin();
+  }
+
+  // ───────────────────────────── intro cinematic ─────────────────────────────
+
+  /** Play the opening clip over the live world, then call `done`. Esc, Space, Enter or a click skips it. */
+  private playIntro(done: () => void): void {
+    this.introActive = true;
+    this.introT = 0;
+    this.introDone = done;
+    this.introCamera = { x: this.rig.target.x, z: this.rig.target.z, zoom: this.rig.zoom, yaw: this.rig.yaw };
+    this.menuOpen = true;
+    this.input.enabled = false;
+    this.hud.hideOverlay();
+    this.hud.showHud(false);
+    this.atmosphere.override = { tod: 0.27, rain: 0, mist: 0.12 }; // dawn light, clear air
+    this.hud.showIntro(true);
+  }
+
+  private endIntro(): void {
+    if (!this.introActive) return;
+    this.introActive = false;
+    this.hud.showIntro(false);
+    this.atmosphere.override = {};
+    const c = this.introCamera;
+    if (c) { this.rig.setYaw(c.yaw); this.rig.setTarget(c.x, c.z, true); this.rig.setZoom(c.zoom, true); }
+    this.introCamera = null;
+    const done = this.introDone;
+    this.introDone = null;
+    done?.();
+  }
+
+  private watchIntro(): void {
+    this.playIntro(() => { if (this.inGame) this.openMenu(); else this.showMainMenu(); });
+  }
+
+  private updateIntro(dt: number): void {
+    this.introT += dt;
+    const fort = this.state.buildings.find((b) => b.type === 'stronghold');
+    const palace = this.state.buildings.find((b) => b.type === 'palace');
+    const centre = (b: { x0: number; z0: number; type: BuildingType }): { x: number; z: number } => ({ x: b.x0 + BUILDING_DEFS[b.type].w / 2, z: b.z0 + BUILDING_DEFS[b.type].d / 2 });
+    const cap = palace ? centre(palace) : { x: this.terrain.size / 2, z: this.terrain.size / 2 };
+    const reduced = this.settings.reducedMotion;
+    const shot = introShot(this.introT, cap, fort ? centre(fort) : null, reduced);
+    this.rig.setYaw(shot.yaw);
+    this.rig.setZoom(shot.zoom, true);
+    this.rig.setTarget(shot.x, shot.z, true);
+    const line = lineAt(this.introT);
+    if (line) this.hud.setIntroLine(line.text, revealed(line.text, this.introT - line.from, reduced));
+    else this.hud.setIntroLine('', '');
+    this.hud.showIntroTitle(this.introT >= TITLE_FROM);
+    if (this.introT >= INTRO_SECONDS) this.endIntro();
+  }
+
+  // ───────────────────────────── story ─────────────────────────────
+
+  private syncChronicle(): void {
+    this.hud.setChronicle((this.state.story ?? []).flatMap((id) => { const b = beatById(id); return b ? [{ title: b.title, text: b.text }] : []; }));
+  }
+
+  /** Show captions for milestones reached since the last check. Outcome epilogues appear on the end screen instead. */
+  private checkStory(): void {
+    const fresh = newBeats(this.state);
+    if (fresh.length === 0) return;
+    markSeen(this.state, fresh);
+    for (const b of fresh) if (b.id !== 'victory' && b.id !== 'fall') this.hud.showStory(b.title, b.text);
+    this.syncChronicle();
   }
 
   private applyLoaded(r: LoadResult): void {
@@ -241,6 +320,8 @@ export class Game {
       return;
     }
     const g = { state: r.state, nav: buildNav(this.terrain, r.state) };
+    // Saves from before the story existed: mark already-true milestones as seen so they do not all fire at once.
+    if (r.state.story === undefined) markSeen(r.state, newBeats(r.state));
     // Saves from before the rival existed get one now (unless the game was already decided).
     const rivalAdded = !g.state.outcome && !g.state.buildings.some((b) => b.type === 'stronghold') && addEnemyBase(g.state, this.terrain, g.nav, this.settings.difficulty);
     this.setWorld(g);
@@ -280,7 +361,7 @@ export class Game {
     const won = outcome === 'victory';
     this.hud.showOverlay({
       inGame: false, canContinue: false, title: won ? 'VICTORY' : 'DEFEAT',
-      sub: won ? 'The rival stronghold has fallen. The kingdom is yours.' : 'Your palace has been destroyed.',
+      sub: `${won ? 'The rival stronghold has fallen. The kingdom is yours.' : 'Your palace has been destroyed.'} ${beatById(won ? 'victory' : 'fall')?.text ?? ''}`.trim(),
       note: 'Start a new game or load a saved one.',
     });
   }
@@ -302,6 +383,7 @@ export class Game {
   }
 
   private handleEscape(): void {
+    if (this.introActive) { this.endIntro(); return; }
     if (this.menuOpen) { if (this.inGame && !this.state.outcome) this.closeMenu(); return; }
     if (this.placing) { this.cancelPlacing(); return; }
     if (this.attackMoveArmed) { this.disarmAttackMove(); return; }
@@ -618,12 +700,15 @@ export class Game {
       let steps = 0;
       while (this.acc >= SIM_STEP && steps < 6) { stepSimulation(this.state, SIM_STEP, this.nav); this.acc -= SIM_STEP; steps++; }
       if (steps === 6) this.acc = 0;
+      this.checkStory();
+      this.hud.tickStory(dt);
       if (this.state.outcome && !this.outcomeShown) this.showOutcome(this.state.outcome);
       this.alpha = this.acc / SIM_STEP;
       this.autosaveTimer += dt;
       if (this.autosaveTimer >= AUTOSAVE_SECONDS) { this.autosaveTimer = 0; this.autosave(false); }
     }
 
+    if (this.introActive) this.updateIntro(dt);
     this.input.update(dt);
     this.rig.update(dt);
     this.updateMarker(dt);
@@ -745,7 +830,8 @@ export class Game {
   debug() {
     return {
       state: this.state, terrain: this.terrain, nav: this.nav, rig: this.rig, atmosphere: this.atmosphere,
-      selectedUnits: this.selectedUnits, newGame: () => this.newGame(), unitScreenItems: () => this.unitScreenItems(),
+      selectedUnits: this.selectedUnits, newGame: () => this.newGame(),
+      introActive: () => this.introActive, introTime: () => this.introT, skipIntro: () => this.endIntro(), unitScreenItems: () => this.unitScreenItems(),
       handleClick: (x: number, y: number, s = false) => this.handleClick(x, y, s),
       handleBox: (a: number, b: number, c: number, d: number, s = false) => this.handleBox(a, b, c, d, s),
       handleRightClick: (x: number, y: number) => this.handleRightClick(x, y),

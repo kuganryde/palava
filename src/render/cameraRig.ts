@@ -54,6 +54,9 @@ export class CameraRig {
     if (instant) { this.zoom = this.goalZoom; this.apply(); }
   }
 
+  /** Snap the heading (used by the intro cinematic and when it hands the camera back). */
+  setYaw(yaw: number): void { this.yaw = yaw; this.goalYaw = yaw; this.apply(); }
+
   rotateStep(dir: 1 | -1): void { this.goalYaw += dir * (Math.PI / 2); }
 
   zoomBy(factor: number): void {

@@ -23,6 +23,8 @@ export interface HudHandlers {
   onLoad(): void;
   onSettings(s: Partial<Settings>): void;
   onSoundToggle(): void;
+  onWatchIntro(): void;
+  onIntroSkip(): void;
 }
 
 export type SelectionInfo =
@@ -52,6 +54,9 @@ export class Hud {
   private readonly selPanel = $('selpanel');
   private readonly cache = new Map<string, string>();
   private toastTimers = new Set<number>();
+  private storyQueue: Array<{ title: string; text: string }> = [];
+  private storyLeft = 0;
+  private chronicle: Array<{ title: string; text: string }> = [];
 
   constructor(private readonly h: HudHandlers) {
     this.buildResourceBar();
@@ -68,6 +73,17 @@ export class Hud {
     $('ov-save').addEventListener('click', h.onSave);
     $('ov-load').addEventListener('click', h.onLoad);
     $('ov-settings').addEventListener('click', () => this.pane('settings'));
+    $('ov-chronicle').addEventListener('click', () => { this.renderChronicle(); this.pane('chronicle'); });
+    $('chronicle-back').addEventListener('click', () => this.pane('main'));
+    $('ov-intro').addEventListener('click', h.onWatchIntro);
+    $<HTMLInputElement>('set-intro').addEventListener('change', (e) => h.onSettings({ intro: (e.target as HTMLInputElement).checked }));
+    $('story-close').addEventListener('click', () => this.nextStory());
+    const intro = $('intro');
+    $('intro-skip').addEventListener('click', (e) => { e.stopPropagation(); h.onIntroSkip(); });
+    intro.addEventListener('click', h.onIntroSkip);
+    intro.addEventListener('keydown', (e) => {
+      if (e.code === 'Escape' || e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); e.stopPropagation(); h.onIntroSkip(); }
+    });
     $('ov-help').addEventListener('click', () => this.pane('help'));
     $('set-back').addEventListener('click', () => this.pane('main'));
     $('help-back').addEventListener('click', () => this.pane('main'));
@@ -226,6 +242,57 @@ export class Hud {
     }
   }
 
+  // ── story captions ──
+
+  /** Show a caption (queued behind any already on screen). All text goes through textContent. */
+  showStory(title: string, text: string): void {
+    this.storyQueue.push({ title, text });
+    if (this.storyLeft <= 0) this.nextStory();
+  }
+  private nextStory(): void {
+    const next = this.storyQueue.shift();
+    const card = $('story');
+    if (!next) { card.hidden = true; this.storyLeft = 0; return; }
+    $('story-title').textContent = next.title;
+    $('story-text').textContent = next.text;
+    card.hidden = false;
+    this.storyLeft = 11;
+  }
+  /** Count the caption down in game time, so pausing or opening the menu holds it on screen. */
+  tickStory(dt: number): void {
+    if (this.storyLeft <= 0) return;
+    this.storyLeft -= dt;
+    if (this.storyLeft <= 0) this.nextStory();
+  }
+  clearStory(): void { this.storyQueue = []; this.storyLeft = 0; $('story').hidden = true; }
+
+  /** The chronicle lists every caption seen this game, oldest first. */
+  setChronicle(entries: Array<{ title: string; text: string }>): void { this.chronicle = entries; }
+  private renderChronicle(): void {
+    const list = $('chronicle-list');
+    list.replaceChildren();
+    if (this.chronicle.length === 0) { list.append(el('li', 'empty', 'No chapters yet. Your story begins when the first stone is set.')); return; }
+    for (const c of this.chronicle) { const li = el('li'); li.append(el('b', undefined, c.title), el('i', undefined, c.text)); list.append(li); }
+  }
+
+  // ── intro cinematic ──
+
+  showIntro(visible: boolean): void {
+    const intro = $('intro');
+    intro.hidden = !visible;
+    if (visible) {
+      $('intro-title').hidden = true; $('intro-sub').hidden = true;
+      this.setIntroLine('', '');
+      intro.focus({ preventScroll: true });
+    }
+  }
+  /** `full` goes to screen readers at once; `typed` is the animated visible text. */
+  setIntroLine(full: string, typed: string): void {
+    this.set('intro.full', full, () => { $('intro-sr').textContent = full; });
+    $('intro-typed').textContent = typed;
+  }
+  showIntroTitle(visible: boolean): void { $('intro-title').hidden = !visible; $('intro-sub').hidden = !visible; }
+
   toast(message: string, kind: 'info' | 'good' | 'error' = 'info'): void {
     const root = $('toasts');
     while (root.children.length >= 3) root.firstElementChild?.remove();
@@ -260,13 +327,14 @@ export class Hud {
   showStats(visible: boolean): void { $('stats').hidden = !visible; }
   showHud(visible: boolean): void { $('hud').hidden = !visible; }
 
-  private pane(which: 'main' | 'settings' | 'help'): void {
+  private pane(which: 'main' | 'settings' | 'help' | 'chronicle'): void {
+    $('ov-chronicle-pane').hidden = which !== 'chronicle';
     $('ov-main').hidden = which !== 'main';
     $('ov-settings-pane').hidden = which !== 'settings';
     $('ov-help-pane').hidden = which !== 'help';
     const first = which === 'main'
       ? document.querySelector<HTMLElement>('#ov-main button:not([hidden])')
-      : which === 'settings' ? $('set-quality') : $('help-back');
+      : which === 'settings' ? $('set-quality') : which === 'chronicle' ? $('chronicle-back') : $('help-back');
     first?.focus();
   }
 
@@ -297,6 +365,7 @@ export class Hud {
     $<HTMLInputElement>('set-daynight').checked = s.dayNight;
     $<HTMLInputElement>('set-weather').checked = s.weather;
     $<HTMLInputElement>('set-sound').checked = s.sound;
+    $<HTMLInputElement>('set-intro').checked = s.intro;
     const bs = $('btn-sound'); bs.classList.toggle('muted', !s.sound); bs.setAttribute('aria-pressed', String(!s.sound));
     bs.setAttribute('aria-label', s.sound ? 'Mute sound (M)' : 'Unmute sound (M)');
   }

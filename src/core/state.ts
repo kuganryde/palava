@@ -79,6 +79,8 @@ export interface GameState {
   units: UnitState[];
   nextId: number;
   ai?: AiState;
+  /** Ids of story beats already shown (see story/story.ts). */
+  story?: string[];
   /** Set once the game is decided; the simulation then stops advancing. */
   outcome?: Outcome;
   /** Recent combat events (transient, not saved). */

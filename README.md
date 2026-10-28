@@ -116,3 +116,9 @@ Game logic never touches Three.js, so it is unit-testable and can later move to 
 - **Difficulty** (Settings, applies to new games): Easy / Normal / Hard change the rival's income, first-raid time, wave gap and head start. Unit stats are identical on every level.
 - **Counters.** Sword warriors beat cavalry, cavalry ride down archers, archers shoot infantry and elephants; elephants deal double damage to buildings.
 - **Authored buildings.** Put a GLB at `public/models/` and list it in `public/models/buildings.json` as `{ "buildings": { "temple": "temple.glb" } }`. It is scaled to the footprint and loaded automatically (same origin only, 120k-triangle limit); a missing or rejected file keeps the procedural model.
+
+## Stage 11: intro clip and story
+
+- **Intro (about 26 s).** A real-time cinematic rendered by the game itself: dawn over the capital, a push in to the palace, a pull back toward the rival's land, four subtitle lines and the title card. Skip with Esc, Space, Enter, a click or the Skip button. Turn it off in Settings ("Play the intro before new games"), or replay it from the menu ("Watch Intro"). With reduced motion the camera holds still and text appears at once. No video files; no extra network requests.
+- **Story captions.** Short fictional captions appear once per game at milestones: first building, first harvest, first raid, the raid broken, the army marching out, the stronghold wounded, and the victory or fall epilogue. They count down in game time (pausing holds them), can be dismissed, and are announced politely to screen readers.
+- **Chronicle.** The menu lists every chapter reached in the current game. Seen beats are saved with the game (ids are whitelisted on load).

@@ -3,6 +3,7 @@ import {
   type BuildingType, type UnitKind,
 } from '../core/defs';
 import { clamp } from '../core/math';
+import { isBeatId } from '../story/story';
 import { DIFFICULTIES, emptyResources, teamOf, type BuildingState, type Difficulty, type GameState, type UnitState } from '../core/state';
 
 /** Minimal Storage contract so tests can inject an in-memory implementation. */
@@ -134,10 +135,12 @@ export function parseSave(raw: string, mapSize: number): LoadResult {
       };
     }
   }
+  // Story ids are whitelisted: unknown values (tampered saves) are dropped, duplicates collapsed.
+  const story = Array.isArray(s.story) ? [...new Set(s.story.filter(isBeatId))] : [];
   const outcome = s.outcome === 'victory' || s.outcome === 'defeat' ? s.outcome : undefined;
   const maxId = Math.max(0, ...ids);
   const nextId = Math.max(num(s.nextId) ?? 0, maxId + 1);
-  return { ok: true, savedAt, state: { version: 2, seed, time, resources, buildings, units, nextId, ...(ai ? { ai } : {}), ...(outcome ? { outcome } : {}) } };
+  return { ok: true, savedAt, state: { version: 2, seed, time, resources, buildings, units, nextId, ...(ai ? { ai } : {}), ...(story.length ? { story } : {}), ...(outcome ? { outcome } : {}) } };
 }
 
 export class SaveStore {
