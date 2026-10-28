@@ -24,7 +24,7 @@ jobs:
       # Third-party actions should be pinned to a full commit SHA once you have vetted them; tags are used here
       # so the file works out of the box. Dependabot (see .github/dependabot.yml) keeps them current.
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -54,7 +54,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
