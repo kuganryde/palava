@@ -122,3 +122,29 @@ Game logic never touches Three.js, so it is unit-testable and can later move to 
 - **Intro (about 26 s).** A real-time cinematic rendered by the game itself: dawn over the capital, a push in to the palace, a pull back toward the rival's land, four subtitle lines and the title card. Skip with Esc, Space, Enter, a click or the Skip button. Turn it off in Settings ("Play the intro before new games"), or replay it from the menu ("Watch Intro"). With reduced motion the camera holds still and text appears at once. No video files; no extra network requests.
 - **Story captions.** Short fictional captions appear once per game at milestones: first building, first harvest, first raid, the raid broken, the army marching out, the stronghold wounded, and the victory or fall epilogue. They count down in game time (pausing holds them), can be dismissed, and are announced politely to screen readers.
 - **Chronicle.** The menu lists every chapter reached in the current game. Seen beats are saved with the game (ids are whitelisted on load).
+
+## CrazyGames build (Stage 12)
+
+```bash
+npm run build:cg      # type-check, build with --mode crazygames, validate size limits, write palava-crazygames.zip
+```
+
+What the portal build changes (everything else is identical to the web build):
+
+- Relative asset paths (`base: './'`), output in `dist-crazygames/`.
+- The CrazyGames SDK v3 script is injected into `index.html`; the CSP allows only that script origin and `https:`/`wss:` connections for the SDK, and the referrer policy is relaxed to `strict-origin-when-cross-origin`.
+- `src/platform/platform.ts` is the only code that touches `window.CrazyGames`. Every SDK call is wrapped, the SDK is used only on the portal (or its local preview), and a blocked or silent SDK falls back after 4 s so the game always starts.
+- **Gameplay events:** `gameplayStart`/`gameplayStop` fire only on changes, and only while actually playing (not in menus, pause, intro, ad or end screen). `loadingStart`/`loadingStop` bracket boot. `happytime` fires on victory.
+- **Ads:** a midgame ad is requested only at a natural break (starting a new game after a finished one), never mid-play. Audio and input are held during the ad, and the game resumes even if the ad fails.
+- **Audio:** the portal mute setting overrides the in-game sound setting; a hidden tab is muted.
+- **Saves and settings:** use the portal data module (cloud saves for signed-in players) and fall back to `localStorage` per call.
+- **No** cryptocurrency, pay-to-win or external links; no location permission.
+
+Play aids added for the portal audience: a six-step guided tutorial (skippable, off for loaded games), quick-select bar and hotkeys (`R` army, `I` idle villagers), touch tap-to-command (tap ground to move, tap a foe or a rival building to attack, tap a workplace to assign villagers), right-click attack on rival buildings, and a compact HUD for screens under 520 px tall.
+
+### Checklist before submitting
+- [ ] Upload `palava-crazygames.zip` to the CrazyGames Developer Portal and test in their preview tool (desktop and mobile frames).
+- [ ] Record the preview video (15-20 s, 1080p landscape and portrait, no sound) on a machine with a real GPU.
+- [ ] Prepare covers: 1920x1080, 800x1200 and 800x800 (title only, no borders).
+- [ ] After the preview run, tighten the CSP `connect-src` to the hosts the SDK actually uses.
+- [ ] Credit any third-party model (for example the temple GLB) with its licence before shipping it.

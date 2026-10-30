@@ -3,6 +3,7 @@ import {
   type BuildingType, type ResourceId, type Resources, type UnitKind,
 } from '../core/defs';
 import { canAfford, missingResources, type Difficulty } from '../core/state';
+import { parseHint } from '../story/tutorial';
 import { FORMATIONS, type FormationKind } from '../systems/formation';
 import type { Quality, Settings } from '../systems/settings';
 
@@ -23,6 +24,8 @@ export interface HudHandlers {
   onLoad(): void;
   onSettings(s: Partial<Settings>): void;
   onSoundToggle(): void;
+  onQuick(kind: 'army' | 'idle' | 'attack' | 'clear'): void;
+  onTutorialSkip(): void;
   onWatchIntro(): void;
   onIntroSkip(): void;
 }
@@ -73,6 +76,11 @@ export class Hud {
     $('ov-save').addEventListener('click', h.onSave);
     $('ov-load').addEventListener('click', h.onLoad);
     $('ov-settings').addEventListener('click', () => this.pane('settings'));
+    for (const [id, kind] of [['q-army', 'army'], ['q-idle', 'idle'], ['q-attack', 'attack'], ['q-clear', 'clear']] as const) {
+      $(id).addEventListener('click', () => h.onQuick(kind));
+    }
+    $('tut-skip').addEventListener('click', h.onTutorialSkip);
+    $<HTMLInputElement>('set-tutorial').addEventListener('change', (e) => h.onSettings({ tutorial: (e.target as HTMLInputElement).checked }));
     $('ov-chronicle').addEventListener('click', () => { this.renderChronicle(); this.pane('chronicle'); });
     $('chronicle-back').addEventListener('click', () => this.pane('main'));
     $('ov-intro').addEventListener('click', h.onWatchIntro);
@@ -242,6 +250,25 @@ export class Hud {
     }
   }
 
+  // ── tutorial ──
+
+  /** Show the current objective, or hide the card with null. Hints may carry [key caps]. */
+  setTutorial(step: { index: number; total: number; title: string; hint: string } | null): void {
+    const card = $('tutorial');
+    if (!step) { this.set('tut', 'off', () => { card.hidden = true; }); return; }
+    this.set('tut', `${step.index}|${step.title}|${step.hint}`, () => {
+      card.hidden = false;
+      $('tut-count').textContent = `Getting started ${step.index + 1}/${step.total}`;
+      $('tut-title').textContent = step.title;
+      const hint = $('tut-hint');
+      hint.replaceChildren();
+      for (const part of parseHint(step.hint)) hint.append(part.key ? el('kbd', undefined, part.text) : document.createTextNode(part.text));
+      const dots = $('tut-dots');
+      dots.replaceChildren();
+      for (let i = 0; i < step.total; i++) dots.append(el('i', i < step.index ? 'done' : i === step.index ? 'now' : undefined));
+    });
+  }
+
   // ── story captions ──
 
   /** Show a caption (queued behind any already on screen). All text goes through textContent. */
@@ -274,6 +301,9 @@ export class Hud {
     if (this.chronicle.length === 0) { list.append(el('li', 'empty', 'No chapters yet. Your story begins when the first stone is set.')); return; }
     for (const c of this.chronicle) { const li = el('li'); li.append(el('b', undefined, c.title), el('i', undefined, c.text)); list.append(li); }
   }
+
+  /** Blocks input while an ad is requested, so nothing can be clicked through it. */
+  showAdBlock(visible: boolean): void { $('adblock').hidden = !visible; }
 
   // ── intro cinematic ──
 
@@ -366,6 +396,7 @@ export class Hud {
     $<HTMLInputElement>('set-weather').checked = s.weather;
     $<HTMLInputElement>('set-sound').checked = s.sound;
     $<HTMLInputElement>('set-intro').checked = s.intro;
+    $<HTMLInputElement>('set-tutorial').checked = s.tutorial;
     const bs = $('btn-sound'); bs.classList.toggle('muted', !s.sound); bs.setAttribute('aria-pressed', String(!s.sound));
     bs.setAttribute('aria-label', s.sound ? 'Mute sound (M)' : 'Unmute sound (M)');
   }

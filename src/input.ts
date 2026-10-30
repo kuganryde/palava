@@ -3,7 +3,7 @@ import { pinchDelta, pinchOf, type Pinch } from './systems/gesture';
 
 export interface InputHandlers {
   /** Plain left click (no drag). Coordinates are CSS pixels relative to the canvas. */
-  onClick(x: number, y: number, shift: boolean): void;
+  onClick(x: number, y: number, shift: boolean, touch: boolean): void;
   onBoxSelect(x1: number, y1: number, x2: number, y2: number, shift: boolean): void;
   onRightClick(x: number, y: number): void;
   onHover(x: number, y: number): void;
@@ -15,6 +15,8 @@ export interface InputHandlers {
   onToggleSound(): void;
   /** F: arm attack-move (the next ground click). */
   onAttackMove(): void;
+  /** R selects every warrior, I the idle villagers. */
+  onQuick(kind: 'army' | 'idle'): void;
   /** Alt+digit assigns a control group, Shift+digit recalls it. */
   onGroup(index: number, action: 'set' | 'recall'): void;
 }
@@ -132,7 +134,7 @@ export class InputController {
     this.cancelDrag();
     if (!this.enabled) return;
     if (wasDrag) this.h.onBoxSelect(start.x, start.y, p.x, p.y, start.shift || e.shiftKey);
-    else this.h.onClick(p.x, p.y, start.shift || e.shiftKey);
+    else this.h.onClick(p.x, p.y, start.shift || e.shiftKey, e.pointerType === 'touch');
   }
 
   private cancelDrag(): void {
@@ -172,6 +174,8 @@ export class InputController {
     if (e.code === 'Minus' || e.code === 'NumpadSubtract') { this.rig.zoomBy(1 / 1.15); return; }
     if (e.code === 'KeyH') { if (!e.repeat) this.h.onHome(); return; }
     if (e.code === 'KeyF') { if (!e.repeat) this.h.onAttackMove(); return; }
+    if (e.code === 'KeyR') { if (!e.repeat) this.h.onQuick('army'); return; }
+    if (e.code === 'KeyI') { if (!e.repeat) this.h.onQuick('idle'); return; }
     if (e.code === 'KeyM') { if (!e.repeat) this.h.onToggleSound(); return; }
     if (e.code === 'F3') { e.preventDefault(); if (!e.repeat) this.h.onToggleStats(); return; }
     const digit = /^Digit([1-9])$/.exec(e.code);

@@ -20,7 +20,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const ctx = await browser.newContext({ viewport: { width: 960, height: 600 } });
-await ctx.addInitScript(() => localStorage.setItem('palava.settings.v1', JSON.stringify({ quality: 'low', shadows: false, adaptiveResolution: true, reducedMotion: false, intro: false })));
+await ctx.addInitScript(() => localStorage.setItem('palava.settings.v1', JSON.stringify({ quality: 'low', shadows: false, adaptiveResolution: true, reducedMotion: false, intro: false, tutorial: false })));
 const page = await ctx.newPage();
 const logs = [];
 page.on('console', (m) => { if (m.type() === 'error') logs.push(`[error] ${m.text()}`); });

@@ -3,3 +3,5 @@ dist
 e2e/artifacts
 .vercel
 .env*
+dist-crazygames
+palava-crazygames.zip
