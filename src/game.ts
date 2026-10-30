@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { BUILDABLE, BUILDING_DEFS, MAX_UNITS, SIM_STEP, TRAINABLE, UNIT_DEFS, type BuildingType, type UnitKind } from './core/defs';
-import { buildingHp, canAfford, incomePerSecond, isAlive, popCap, population, teamOf, workersOnSite, type GameState, type Team } from './core/state';
+import { buildingHp, buildingTeam, canAfford, incomePerSecond, isAlive, popCap, population, teamOf, workersOnSite, type GameState, type Team } from './core/state';
 import { commandAttack } from './systems/combat';
 import { loadBuildingManifest } from './render/buildingGltf';
+import { nullPlatform, type Platform } from './platform/platform';
 import { INTRO_SECONDS, TITLE_FROM, introShot, lineAt, revealed } from './story/intro';
 import { beatById, markSeen, newBeats } from './story/story';
+import { STEPS, advance, isComplete } from './story/tutorial';
 import { commandWork } from './systems/economy';
 import { addEnemyBase } from './systems/enemyAi';
 import { InputController } from './input';
@@ -20,7 +22,7 @@ import { AdaptiveResolution } from './systems/adaptive';
 import type { FormationKind } from './systems/formation';
 import type { NavGrid } from './systems/pathfinding';
 import { footprintCenter, footprintOrigin, PLACEMENT_MESSAGES, validatePlacement } from './systems/placement';
-import { safeLocalStorage, SaveStore, type LoadResult } from './systems/save';
+import { safeLocalStorage, SaveStore, type KeyValueStore, type LoadResult } from './systems/save';
 import { boxSelect, mergeSelection, pickNearest, type ScreenItem } from './systems/selection';
 import {
   defaultSettings, loadSettings, QUALITY_PRESETS, saveSettings, type Settings,
@@ -62,7 +64,12 @@ export class Game {
   private readonly hud: Hud;
   private readonly input: InputController;
   private readonly saves: SaveStore;
-  private readonly store = safeLocalStorage();
+  private readonly store: KeyValueStore | null;
+  private tutIndex = 0;
+  private tutMoved = false;
+  private tutRecruited = false;
+  private adActive = false;
+  private adPlaying = false;
   private readonly adaptive = new AdaptiveResolution(0.55, 1, 16.7);
   private settings: Settings;
 
@@ -106,7 +113,9 @@ export class Game {
   private readonly barPos = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(private readonly canvas: HTMLCanvasElement, private readonly platform: Platform = nullPlatform) {
+    // Portal storage (cloud saves for signed-in players) when available, otherwise localStorage.
+    this.store = platform.store() ?? safeLocalStorage();
     const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     this.settings = loadSettings(this.store, defaultSettings(reduced));
     this.terrain = generateTerrain(WORLD_SEED);
@@ -144,17 +153,20 @@ export class Game {
       onMenu: () => this.openMenu(),
       onResume: () => this.closeMenu(),
       onContinue: () => this.continueGame(),
-      onNewGame: () => this.newGame(),
+      onNewGame: () => this.requestNewGame(),
       onSave: () => this.saveManual(),
       onLoad: () => this.loadManual(),
       onSettings: (s) => this.changeSettings(s),
       onSoundToggle: () => this.changeSettings({ sound: !this.settings.sound }),
+      onQuick: (k) => this.quickSelect(k),
+      onTutorialSkip: () => this.skipTutorial(),
       onWatchIntro: () => this.watchIntro(),
       onIntroSkip: () => this.endIntro(),
     });
     this.minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, this.terrain, (x, z) => this.rig.setTarget(x, z, false));
     this.input = new InputController(canvas, this.rig, {
-      onClick: (x, y, shift) => this.handleClick(x, y, shift),
+      onClick: (x, y, shift, touch) => this.handleClick(x, y, shift, touch),
+      onQuick: (k) => this.quickSelect(k),
       onBoxSelect: (a, b, c, d, shift) => this.handleBox(a, b, c, d, shift),
       onRightClick: (x, y) => this.handleRightClick(x, y),
       onHover: (x, y) => { this.pointer = { x, y, inside: true }; },
@@ -171,8 +183,9 @@ export class Game {
     this.rig.ground = (x, z) => heightAt(this.terrain, x, z);
     this.bars = new HealthBars(document.getElementById('bars') as HTMLCanvasElement);
     // Browsers only allow audio after a user gesture: the first real interaction starts the soundscape.
-    const unlock = (): void => { this.audio.start(); this.audio.setEnabled(this.settings.sound); };
-    for (const ev of ['pointerdown', 'keydown'] as const) window.addEventListener(ev, unlock, { once: false, passive: true });
+    const unlock = (): void => { this.audio.start(); this.audio.setEnabled(this.soundOn()); };
+    // touchend/click as well: iOS needs a gesture to resume audio after an interruption, and a visibility change alone is not enough.
+    for (const ev of ['pointerdown', 'keydown', 'touchend', 'click'] as const) window.addEventListener(ev, unlock, { once: false, passive: true });
 
     // A world to look at behind the main menu.
     this.setWorld(createNewGame(this.terrain));
@@ -185,7 +198,11 @@ export class Game {
     canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.hud.toast('Graphics context lost — waiting for the browser to restore it…', 'error'); });
     canvas.addEventListener('webglcontextrestored', () => { this.applySettings(); this.hud.toast('Graphics restored', 'good'); });
     window.addEventListener('pagehide', () => this.autosave(true));
-    document.addEventListener('visibilitychange', () => { if (document.hidden) this.autosave(true); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.autosave(true);
+      this.audio.setEnabled(this.soundOn() && !document.hidden); // a hidden tab is silent
+    });
+    this.platform.onMuteChange(() => this.audio.setEnabled(this.soundOn())); // the portal's mute wins over our toggle
 
     this.showMainMenu();
     this.raf = requestAnimationFrame(this.frame);
@@ -239,6 +256,7 @@ export class Game {
     addEnemyBase(g.state, this.terrain, g.nav, this.settings.difficulty); // rival stronghold + garrison; raids start after a grace period
     this.setWorld(g);
     this.autosaveTimer = 0;
+    this.tutIndex = 0; this.tutMoved = false; this.tutRecruited = false;
     const begin = (): void => {
       this.startPlaying();
       this.hud.toast('A new kingdom begins. Build, recruit, and explore.', 'good');
@@ -297,6 +315,45 @@ export class Game {
     if (this.introT >= INTRO_SECONDS) this.endIntro();
   }
 
+  // ───────────────────────────── tutorial ─────────────────────────────
+
+  /** Drive the guided objectives: show the current step, advance when it is done, finish cleanly. */
+  private updateTutorial(): void {
+    if (!this.settings.tutorial || !this.inGame || this.state.outcome) { this.hud.setTutorial(null); return; }
+    if (this.tutIndex >= STEPS.length) { this.hud.setTutorial(null); return; }
+    let farms = 0, staffed = 0, barracks = 0;
+    for (const b of this.state.buildings) {
+      if (buildingTeam(b) !== 0) continue;
+      if (b.type === 'farm') farms++;
+      if (b.type === 'barracks' && b.progress >= 1) barracks++;
+      const slots = BUILDING_DEFS[b.type].slots;
+      if (slots > 0 && b.progress >= 1) staffed += Math.min(slots, workersOnSite(this.state, b));
+    }
+    let selectedFighters = 0;
+    for (const u of this.state.units) if (this.selectedUnits.has(u.id) && u.kind !== 'villager' && isAlive(u)) selectedFighters++;
+    const next = advance(this.tutIndex, { selectedFighters, moved: this.tutMoved, farms, staffed, barracks, recruited: this.tutRecruited });
+    if (next !== this.tutIndex) {
+      this.tutIndex = next;
+      if (isComplete(next)) {
+        this.hud.setTutorial(null);
+        this.hud.toast('Well done! Hold out against the raids, then break the rival stronghold.', 'good');
+        this.changeSettings({ tutorial: false });
+        return;
+      }
+    }
+    const step = STEPS[this.tutIndex]!;
+    this.hud.setTutorial({ index: this.tutIndex, total: STEPS.length, title: step.title, hint: step.hint(this.touchLikely) });
+  }
+
+  private skipTutorial(): void {
+    this.tutIndex = STEPS.length;
+    this.hud.setTutorial(null);
+    this.changeSettings({ tutorial: false });
+  }
+
+  /** True on devices whose primary input is touch (decides which hints to show). */
+  private get touchLikely(): boolean { return window.matchMedia?.('(pointer: coarse)').matches ?? false; }
+
   // ───────────────────────────── story ─────────────────────────────
 
   private syncChronicle(): void {
@@ -322,6 +379,7 @@ export class Game {
     const g = { state: r.state, nav: buildNav(this.terrain, r.state) };
     // Saves from before the story existed: mark already-true milestones as seen so they do not all fire at once.
     if (r.state.story === undefined) markSeen(r.state, newBeats(r.state));
+    this.tutIndex = STEPS.length; // a loaded game is past the tutorial
     // Saves from before the rival existed get one now (unless the game was already decided).
     const rivalAdded = !g.state.outcome && !g.state.buildings.some((b) => b.type === 'stronghold') && addEnemyBase(g.state, this.terrain, g.nav, this.settings.difficulty);
     this.setWorld(g);
@@ -359,6 +417,7 @@ export class Game {
     this.cancelPlacing();
     this.hud.showHud(true);
     const won = outcome === 'victory';
+    if (won) this.platform.happytime();
     this.hud.showOverlay({
       inGame: false, canContinue: false, title: won ? 'VICTORY' : 'DEFEAT',
       sub: `${won ? 'The rival stronghold has fallen. The kingdom is yours.' : 'Your palace has been destroyed.'} ${beatById(won ? 'victory' : 'fall')?.text ?? ''}`.trim(),
@@ -404,13 +463,36 @@ export class Game {
     this.applySettings();
   }
 
+  /** In-game sound setting, overridden by the portal's mute request and silenced while an ad plays. */
+  private soundOn(): boolean { return this.settings.sound && !this.platform.muted && !this.adPlaying; }
+
+  /**
+   * New game. After a finished game this is a natural break, so a midgame ad may run first (the portal
+   * decides whether one is shown and how often). Input stays blocked until the ad ends or fails.
+   */
+  private requestNewGame(): void {
+    if (!this.outcomeShown || this.adActive) { if (!this.adActive) this.newGame(); return; }
+    this.adActive = true;
+    this.input.enabled = false;
+    this.hud.showAdBlock(true);
+    this.platform.requestMidgameAd({
+      started: () => { this.adPlaying = true; this.audio.setEnabled(this.soundOn()); },
+      finished: () => {
+        this.adActive = false; this.adPlaying = false;
+        this.audio.setEnabled(this.soundOn());
+        this.hud.showAdBlock(false);
+        this.newGame();
+      },
+    });
+  }
+
   private applySettings(): void {
     const preset = QUALITY_PRESETS[this.settings.quality];
     this.ctx.applySettings(this.settings);
     this.vegView.setQuality(preset, this.settings.shadows && preset.shadowMapSize > 0);
     this.atmosphere.setQuality(this.settings.quality);
     this.rig.smoothing = !this.settings.reducedMotion;
-    this.audio.setEnabled(this.settings.sound);
+    this.audio.setEnabled(this.soundOn());
     this.adaptive.reset(1);
     this.appliedRatio = 0; // force pixel-ratio re-application next frame
     this.hud.syncSettings(this.settings);
@@ -457,7 +539,15 @@ export class Game {
 
   // ───────────────────────────── input intents ─────────────────────────────
 
-  private handleClick(x: number, y: number, shift: boolean): void {
+  /** The building under a screen point, if any. */
+  private pickBuildingAt(x: number, y: number): number | null {
+    const n = this.ndc(x, y);
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2(n.x, n.y), this.rig.camera);
+    return this.buildingsView.pick(rc);
+  }
+
+  private handleClick(x: number, y: number, shift: boolean, touch = false): void {
     if (this.menuOpen) return;
     if (this.placing) { this.tryPlace(x, y, shift); return; }
     if (this.attackMoveArmed) { this.doAttackMove(x, y); return; }
@@ -468,10 +558,15 @@ export class Game {
       this.refreshHud(true);
       return;
     }
-    const n = this.ndc(x, y);
-    const rc = new THREE.Raycaster();
-    rc.setFromCamera(new THREE.Vector2(n.x, n.y), this.rig.camera);
-    const b = this.buildingsView.pick(rc);
+    const b = this.pickBuildingAt(x, y);
+    // Touch has no right button: with units selected, a tap on the ground, a foe or a workplace is the
+    // command (move, attack, work). Tapping one of your own other buildings still selects it, and the
+    // Clear button drops the selection.
+    if (touch && this.selectedUnits.size > 0) {
+      const wb = b === null ? undefined : this.state.buildings.find((x2) => x2.id === b);
+      const ownOther = !!wb && buildingTeam(wb) === 0 && !(BUILDING_DEFS[wb.type].slots > 0);
+      if (!ownOther) { this.handleRightClick(x, y); return; }
+    }
     if (b !== null) {
       this.selectedBuilding = b;
       if (!shift) this.selectedUnits.clear();
@@ -479,6 +574,22 @@ export class Game {
       this.selectedBuilding = null;
       this.selectedUnits.clear();
     }
+    this.refreshHud(true);
+  }
+
+  /** Quick selection: all warriors, idle villagers, attack-move, or clear. Works with keys, buttons and touch. */
+  private quickSelect(kind: 'army' | 'idle' | 'attack' | 'clear'): void {
+    if (!this.inGame || this.menuOpen || this.placing) return;
+    if (kind === 'attack') { this.armAttackMove(); return; }
+    if (kind === 'clear') { this.disarmAttackMove(); this.selectedUnits.clear(); this.selectedBuilding = null; this.refreshHud(true); return; }
+    const mine = this.state.units.filter((u) => isAlive(u) && teamOf(u) === 0);
+    const picked = kind === 'army'
+      ? mine.filter((u) => u.kind !== 'villager')
+      : mine.filter((u) => u.kind === 'villager' && u.work == null && u.path.length === 0);
+    if (picked.length === 0) { this.hud.toast(kind === 'army' ? 'No warriors to select' : 'No idle villagers', 'info'); return; }
+    this.selectedUnits = new Set(picked.map((u) => u.id));
+    this.selectedBuilding = null;
+    if (kind === 'idle') this.rig.setTarget(picked[0]!.x, picked[0]!.z, false); // show where they are
     this.refreshHud(true);
   }
 
@@ -499,15 +610,18 @@ export class Game {
     const foe = pickNearest(this.unitScreenItems(1), x, y, 26);
     if (foe !== null) {
       if (commandAttack(this.state, this.selectedUnits, foe) === 0) this.hud.toast('Your units cannot attack that', 'error');
+      else this.tutMoved = true;
       return;
     }
-    // Right-clicking a farm, camp or quarry sends selected villagers to work there.
-    const n = this.ndc(x, y);
-    const rc = new THREE.Raycaster();
-    rc.setFromCamera(new THREE.Vector2(n.x, n.y), this.rig.camera);
-    const bid = this.buildingsView.pick(rc);
+    // Right-clicking an enemy building attacks it; a farm, camp or quarry sends selected villagers to work there.
+    const bid = this.pickBuildingAt(x, y);
     if (bid !== null) {
       const wb = this.state.buildings.find((b) => b.id === bid);
+      if (wb && buildingTeam(wb) === 1) {
+        if (commandAttack(this.state, this.selectedUnits, bid) === 0) this.hud.toast('Your units cannot attack that', 'error');
+        else this.tutMoved = true;
+        return;
+      }
       if (wb && BUILDING_DEFS[wb.type].slots > 0 && wb.type !== 'stronghold') {
         if (wb.progress < 1) { this.hud.toast('Wait for it to be finished', 'info'); return; }
         const sent = commandWork(this.state, this.nav, this.selectedUnits, bid);
@@ -520,6 +634,7 @@ export class Game {
     if (!g) return;
     const moved = commandMove(this.state, this.nav, this.selectedUnits, g, this.formation);
     if (moved === 0) { this.hud.toast('Units cannot reach that spot', 'error'); return; }
+    this.tutMoved = true;
     this.marker.position.set(g.x, this.groundHeight(g.x, g.z) + 0.15, g.z);
     this.marker.visible = true;
     this.markerLife = 1;
@@ -543,6 +658,7 @@ export class Game {
     const g = this.pickGround(x, y);
     if (!g) return;
     if (commandAttackMove(this.state, this.nav, this.selectedUnits, g, this.formation) === 0) { this.hud.toast('Units cannot reach that spot', 'error'); return; }
+    this.tutMoved = true;
     this.marker.position.set(g.x, this.groundHeight(g.x, g.z) + 0.15, g.z);
     this.marker.visible = true;
     this.markerLife = 1;
@@ -608,7 +724,7 @@ export class Game {
   private recruit(kind: UnitKind): void {
     if (this.selectedBuilding === null) return;
     const r = recruitUnit(this.state, this.nav, this.selectedBuilding, kind);
-    if (r.ok) this.hud.toast(`${UNIT_DEFS[kind].name} recruited`, 'good');
+    if (r.ok) { this.tutRecruited = true; this.hud.toast(`${UNIT_DEFS[kind].name} recruited`, 'good'); }
     else this.hud.toast(RECRUIT_ERRORS[r.reason] ?? 'Cannot recruit', 'error');
     this.refreshHud(true);
   }
@@ -702,12 +818,15 @@ export class Game {
       if (steps === 6) this.acc = 0;
       this.checkStory();
       this.hud.tickStory(dt);
+      this.updateTutorial();
       if (this.state.outcome && !this.outcomeShown) this.showOutcome(this.state.outcome);
       this.alpha = this.acc / SIM_STEP;
       this.autosaveTimer += dt;
       if (this.autosaveTimer >= AUTOSAVE_SECONDS) { this.autosaveTimer = 0; this.autosave(false); }
     }
 
+    // Tell the portal whether the player is actually playing (menus, pauses, intro, ads and the end screen are not).
+    this.platform.setPlaying(this.inGame && !this.menuOpen && !this.paused && !this.state.outcome && !this.introActive && !this.adActive);
     if (this.introActive) this.updateIntro(dt);
     this.input.update(dt);
     this.rig.update(dt);
@@ -832,7 +951,9 @@ export class Game {
       state: this.state, terrain: this.terrain, nav: this.nav, rig: this.rig, atmosphere: this.atmosphere,
       selectedUnits: this.selectedUnits, newGame: () => this.newGame(),
       introActive: () => this.introActive, introTime: () => this.introT, skipIntro: () => this.endIntro(), unitScreenItems: () => this.unitScreenItems(),
-      handleClick: (x: number, y: number, s = false) => this.handleClick(x, y, s),
+      handleClick: (x: number, y: number, s = false, touch = false) => this.handleClick(x, y, s, touch),
+      quickSelect: (k: 'army' | 'idle' | 'attack' | 'clear') => this.quickSelect(k),
+      soundOn: () => this.soundOn(), tutorialStep: () => this.tutIndex, adActive: () => this.adActive,
       handleBox: (a: number, b: number, c: number, d: number, s = false) => this.handleBox(a, b, c, d, s),
       handleRightClick: (x: number, y: number) => this.handleRightClick(x, y),
       startPlacing: (t: BuildingType) => this.startPlacing(t), saveManual: () => this.saveManual(), loadManual: () => this.loadManual(),

@@ -48,12 +48,28 @@
       <div id="pausebanner" class="pausebanner" hidden role="status">PAUSED — press P to resume</div>
       <div id="stats" class="stats" aria-hidden="true"></div>
       <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+      <aside id="tutorial" class="tutorial" hidden aria-label="Tutorial">
+        <div class="tut-head"><span id="tut-count"></span><button id="tut-skip" type="button">Skip tutorial</button></div>
+        <h3 id="tut-title"></h3>
+        <p id="tut-hint"></p>
+        <div id="tut-dots" class="tut-dots" aria-hidden="true"></div>
+      </aside>
+
+      <div id="quick" class="quick" role="group" aria-label="Quick select">
+        <button id="q-army" type="button" title="Select all warriors (R)">Army</button>
+        <button id="q-idle" type="button" title="Select idle villagers (I)">Idle villagers</button>
+        <button id="q-attack" type="button" title="Attack-move (F)">Attack-move</button>
+        <button id="q-clear" type="button" title="Clear selection">Clear</button>
+      </div>
+
       <aside id="story" class="story" hidden role="status" aria-live="polite">
         <h3 id="story-title"></h3>
         <p id="story-text"></p>
         <button id="story-close" type="button" aria-label="Dismiss story">×</button>
       </aside>
     </div>
+
+    <div id="adblock" class="adblock" hidden role="status" aria-live="polite"><span>Advertisement loading…</span></div>
 
     <div id="intro" class="intro" hidden role="dialog" aria-modal="true" aria-label="Introduction" tabindex="-1">
       <div class="bar top"></div>
@@ -101,6 +117,7 @@
           <label class="check"><input id="set-daynight" type="checkbox" /> Day / night cycle</label>
           <label class="check"><input id="set-weather" type="checkbox" /> Weather (light rain &amp; haze)</label>
           <label class="check"><input id="set-intro" type="checkbox" /> Play the intro before new games</label>
+          <label class="check"><input id="set-tutorial" type="checkbox" /> Show tutorial hints</label>
           <label class="check"><input id="set-sound" type="checkbox" /> Ambient sound</label>
           <label class="check"><input id="set-motion" type="checkbox" /> Reduce motion</label>
           <button id="set-back" type="button">Back</button>

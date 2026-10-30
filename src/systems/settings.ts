@@ -18,6 +18,8 @@ export interface Settings {
   difficulty: Difficulty;
   /** Play the opening cinematic before new games. */
   intro: boolean;
+  /** Guided objectives during the first minutes; switched off when finished or skipped. */
+  tutorial: boolean;
 }
 
 export interface QualityPreset {
@@ -44,7 +46,7 @@ export const QUALITY_PRESETS: Record<Quality, QualityPreset> = {
 const SETTINGS_KEY = 'palava.settings.v1';
 
 export function defaultSettings(prefersReducedMotion = false): Settings {
-  return { quality: 'medium', shadows: true, adaptiveResolution: true, reducedMotion: prefersReducedMotion, dayNight: true, weather: true, sound: true, difficulty: 'normal', intro: true };
+  return { quality: 'medium', shadows: true, adaptiveResolution: true, reducedMotion: prefersReducedMotion, dayNight: true, weather: true, sound: true, difficulty: 'normal', intro: true, tutorial: true };
 }
 
 export function loadSettings(store: KeyValueStore | null, fallback: Settings): Settings {
@@ -64,6 +66,7 @@ export function loadSettings(store: KeyValueStore | null, fallback: Settings): S
       weather: typeof o.weather === 'boolean' ? o.weather : fallback.weather,
       sound: typeof o.sound === 'boolean' ? o.sound : fallback.sound,
       intro: typeof o.intro === 'boolean' ? o.intro : fallback.intro,
+      tutorial: typeof o.tutorial === 'boolean' ? o.tutorial : fallback.tutorial,
       difficulty: o.difficulty === 'easy' || o.difficulty === 'normal' || o.difficulty === 'hard' ? o.difficulty : fallback.difficulty,
     };
   } catch {
