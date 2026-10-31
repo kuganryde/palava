@@ -16,7 +16,7 @@ function crazyGamesHtml(): Plugin {
     apply: 'build',
     transformIndexHtml(html) {
       let out = html.replace("script-src 'self';", `script-src 'self' ${SDK_URL.replace(/\/[^/]*$/, '')};`);
-      out = out.replace("connect-src 'self' ws://localhost:* ws://127.0.0.1:*;", "connect-src 'self' https: wss:;");
+      out = out.replace("connect-src 'self' blob: ws://localhost:* ws://127.0.0.1:*;", "connect-src 'self' blob: https: wss:;");
       out = out.replace("img-src 'self' data: blob:;", "img-src 'self' data: blob: https:;");
       // The portal's endpoints may check the referrer, so send the origin (the regular build sends none).
       out = out.replace('content="no-referrer"', 'content="strict-origin-when-cross-origin"');
